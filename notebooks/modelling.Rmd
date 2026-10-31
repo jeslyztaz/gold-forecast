@@ -1,0 +1,34 @@
+---
+title: "ml modelling"
+output: html_document
+date: "2026-10-31"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+df = read.csv("../data/forecast_dataset.csv")
+```
+
+```{r}
+val_start  <- which(dates >= as.Date("2021-01-01"))[1]
+test_start <- which(dates >= as.Date("2023-01-01"))[1]
+```
+
+```{r historical average}
+n <- length(df$close_usd_per_troy_oz)
+
+ha_exp <- sapply(test_start:n, function(t) mean(r[1:(t-1)]))          # expanding
+ha_rol <- sapply(test_start:n, function(t) mean(r[(t-500):(t-1)]))    # 500-day rolling
+y <- df[test_start:n]
+mse <- function(f) mean((y - f)^2)
+
+r2_oos_vs_ha   <- function(f) 1 - mse(f) / mse(ha_exp)
+r2_oos_vs_zero <- function(f) 1 - mse(f) / mean(y^2)
+```
+
+```{r lasso using rlasso}
+
+```

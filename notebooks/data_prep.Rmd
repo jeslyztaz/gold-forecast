@@ -19,11 +19,14 @@ ai_gpr <- read.csv(paste0(path, "ai_gpr_data_daily.csv"))
 daaa <- read.csv(paste0(path, "DAAA.csv"))
 dbaa <- read.csv(paste0(path, "DBAA.csv"))
 dgs10 <- read.csv(paste0(path, "DGS10.csv"))
-djia <- read.csv(paste0(path, "DJIA.csv"))
+# djia <- read.csv(paste0(path, "DJIA.csv"))
+usd_ind <- read.csv(paste0(path, "DTWEXBGS.csv"))
 gold <- read.csv(paste0(path, "gold-price-history.csv"))
 silver <- read.csv(paste0(path, "silver-price-history.csv")) %>%
-  rename(silver_price = Value)
-sp500 <- read.csv(paste0(path, "SP500.csv"))
+  rename(silver_close_usd_per_troy_oz = close_usd_per_troy_oz)
+sp500 <- read.csv(paste0(path, "SP500.csv")) %>%
+  select(Date, Price) %>%
+  rename(SP500 = Price)
 t10yie <- read.csv(paste0(path, "T10YIE.csv"))
 epu <- read.csv(paste0(path, "USEPUINDXD.csv"))
 vix <- read.csv(paste0(path, "VIXCLS.csv"))
@@ -67,7 +70,7 @@ forecast_dataset <- gold %>%
     lag5 = lag(close_usd_per_troy_oz, n = 5),
     lag20 = lag(close_usd_per_troy_oz, n = 20),
     ma5 = rollmean(close_usd_per_troy_oz, k = 5, fill = NA, align = "right"),
-    ma20 = rollmean(close_usd_per_troy_oz, k = 5, fill = NA, align = "right")
+    ma20 = rollmean(close_usd_per_troy_oz, k = 20, fill = NA, align = "right")
   )
 ```
 
@@ -117,7 +120,7 @@ forecast_dataset <- forecast_dataset %>%
     # missing: LTR, EP, DP, BM
   ) %>%
   
-  filter(date >= today() - years(10)) # keep 10 years of data
+  filter(date >= "2015-01-01" & date <= "2025-12-31") # keep 10 years of data
 ```
 
 ```{r}

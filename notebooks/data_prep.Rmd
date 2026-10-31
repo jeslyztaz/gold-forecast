@@ -1,0 +1,126 @@
+---
+title: "data prep"
+output: html_document
+date: "2026-10-31"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(zoo)
+```
+
+```{r}
+path <- "../data/raw/"
+ai_gpr <- read.csv(paste0(path, "ai_gpr_data_daily.csv"))
+daaa <- read.csv(paste0(path, "DAAA.csv"))
+dbaa <- read.csv(paste0(path, "DBAA.csv"))
+dgs10 <- read.csv(paste0(path, "DGS10.csv"))
+djia <- read.csv(paste0(path, "DJIA.csv"))
+gold <- read.csv(paste0(path, "gold-price-history.csv"))
+silver <- read.csv(paste0(path, "silver-price-history.csv")) %>%
+  rename(silver_price = Value)
+sp500 <- read.csv(paste0(path, "SP500.csv"))
+t10yie <- read.csv(paste0(path, "T10YIE.csv"))
+epu <- read.csv(paste0(path, "USEPUINDXD.csv"))
+vix <- read.csv(paste0(path, "VIXCLS.csv"))
+tbl <- read.csv(paste0(path, "WTB3MS.csv"))
+
+# files <- list.files(
+#   path = path,
+#   pattern = "\\.csv$",
+#   full.names = TRUE
+# )
+# 
+# dataframes <- lapply(files, read_csv)
+```
+
+```{r}
+dataframes <- ls()[sapply(ls(), function(x) is.data.frame(get(x)))]
+
+for (df_name in dataframes) {
+
+  df <- get(df_name)
+  date_cols <- names(df)[grepl("date", names(df), ignore.case = TRUE)]
+
+  for (col_name in date_cols) {
+    df[[col_name]] <- as.Date(parse_date_time(
+      as.character(df[[col_name]]),
+      orders = c("mdy", "dmy", "ymd")
+    ))
+  }
+
+  assign(df_name, df)
+}
+```
+
+
+```{r}
+forecast_dataset <- gold %>%
+  arrange(date) %>%
+  filter(wday(date, week_start = 1) <= 5) %>% # only keep trading days
+  mutate(
+    lag1 = lag(close_usd_per_troy_oz),
+    lag5 = lag(close_usd_per_troy_oz, n = 5),
+    lag20 = lag(close_usd_per_troy_oz, n = 20),
+    ma5 = rollmean(close_usd_per_troy_oz, k = 5, fill = NA, align = "right"),
+    ma20 = rollmean(close_usd_per_troy_oz, k = 5, fill = NA, align = "right")
+  )
+```
+
+```{r}
+for (df_name in dataframes) {
+
+  if (df_name != "gold") {
+    df <- get(df_name)
+    date_cols <- names(df)[grepl("date", names(df), ignore.case = TRUE)]
+
+    forecast_dataset <- forecast_dataset %>%
+      left_join(df, by = c("date" = date_cols[1]))
+  }
+}
+```
+
+```{r}
+forecast_dataset <- forecast_dataset %>%
+  fill(WTB3MS, .direction = "down") %>%
+  
+  # create columns for calculated variables
+  mutate(
+    TMS = DGS10 - WTB3MS,
+    DFY = DBAA - DAAA,
+    gold_return = log(close_usd_per_troy_oz / lag1),
+    RVOL_20 = sqrt(pi / 2) * sqrt(252) *
+      rollapply(
+        abs(gold_return),
+        width = 20,
+        FUN = mean,
+        align = "right",
+        fill = NA),
+    RVOL_60 = sqrt(pi / 2) * sqrt(252) *
+      rollapply(
+        abs(gold_return),
+        width = 60,
+        FUN = mean,
+        align = "right",
+        fill = NA)
+    # RVOL_252 = sqrt(pi / 2) * sqrt(252) *
+    #   rollapply(
+    #     abs(gold_return),
+    #     width = 252,
+    #     FUN = mean,
+    #     align = "right",
+    #     fill = NA)
+    # missing: LTR, EP, DP, BM
+  ) %>%
+  
+  filter(date >= today() - years(10)) # keep 10 years of data
+```
+
+```{r}
+write.csv(forecast_dataset, "../data/forecast_dataset.csv")
+```
+

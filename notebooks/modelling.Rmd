@@ -9,7 +9,12 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r}
-df = read.csv("../data/forecast_dataset.csv")
+library(tidyverse)
+
+df0 = read.csv("../data/forecast_dataset.csv")
+df <- df0 %>%
+  mutate(date = as.Date(date)) %>%
+  fill(everything(), .direction = "down")
 ```
 
 ```{r}
@@ -18,23 +23,156 @@ test_start <- as.Date("2023-01-01")
 ```
 
 ```{r historical average}
-n <- length(df$close_usd_per_troy_oz)
+h <- 5  # 1 = daily, 5 = weekly, 20 = monthly
+n <- nrow(df)
 r <- df$close_usd_per_troy_oz
-ytar <- c(r[-1], NA)
-U  <- which(!is.na(ytar))
-X  <- as.matrix(df[U, ]); y <- ytar[U]; dts <- df$date[U]
-y <- ytar[U]
-dts <- df$date
-TARGET <- "raw"
 
-Nu    <- length(y)
-ha    <- c(NA, cumsum(y)[-Nu] / seq_len(Nu - 1))
-val_idx  <- which(dts >= val_start & dts < test_start); test_idx <- which(dts >= test_start)
-ev_idx   <- c(val_idx, test_idx)                         # contiguous validation + test origins
-cat(sprintf("Target: %s | ", if (TARGET == "raw") "raw gold log return" else "gold excess return"))
-cat(sprintf("Origins %s -> %s | N=%d | p=%d | train %d | val %d | test %d\n", dts[1], dts[length(dts)], length(y), ncol(X), val_idx[1] - 1, length(val_idx), length(test_idx)))
+# Construct h-step-ahead log return
+ytar <- c(r[-h], NA)
+
+U <- which(!is.na(ytar))
+X   <- as.matrix(df[U, ])
+y   <- ytar[U]
+dts <- df$date[U]
+Nu <- length(y)
+
+ha <- c(rep(NA, h), cumsum(y)[seq_len(Nu - h)] / seq_len(Nu - h))
+
+val_idx  <- which(dts >= val_start & dts < test_start)
+test_idx <- which(dts >= test_start)
+ev_idx <- c(val_idx, test_idx)
+
+cat(sprintf("Target: %d-day-ahead gold raw price | ", h))
+cat(sprintf(
+  "Origins %s -> %s | N=%d | p=%d | train %d | val %d | test %d\n",
+  dts[1], dts[length(dts)], length(y), ncol(X), val_idx[1] - 1, length(val_idx),
+  length(test_idx)))
 ```
 
-```{r lasso using rlasso}
+```{r}
+runrlasso <- function(df, indice, pl=FALSE) {
+  
+  train <- df[-nrow(df),]
+  test  <- df[nrow(df),]
+  X_train <- train[,-indice]
+  y_train <- train[,indice]
+  X_test <- test[,-indice]
+  y_test <- test[,indice]
+
+  model <- rlasso(
+    x = X_train,
+    y = y_train,
+    post = pl
+  )
+
+  pred <- predict(model, newdata = X_test)
+
+  return(list("model" = model,"pred" = pred))
+}
+```
+
+```{r}
+rlasso.rolling.window <- function(Y, test_start,indice=1, pl=FALSE){
+  nprev = sum(Y$date >= test_start, na.rm = TRUE)
+  save.coef=matrix(NA, nprev, ncol(Y)) #blank matrix for coefficients at each iteration
+  save.pred=matrix(NA, nprev, 1) #blank for forecasts
+  for(i in nprev:1){ #NB: backwards FOR loop
+    Y.window=Y[(1+nprev-i):(nrow(Y)-i),] #define the estimation window (first one: 1 to 491, then 2 to 492 etc.)
+    lasso=runrlasso(Y.window,indice,pl) #call the modified function to fit rlasso and predict
+    save.coef[(1+nprev-i),]=lasso$model$coef #save estimated coefficients
+    save.pred[(1+nprev-i),]=lasso$pred #save the forecast
+    cat("iteration",(1+nprev-i),"\n") #display iteration number
+  }
+  #Some helpful stuff:
+  real=Y[,indice] #get actual values
+  #plot(real,type="l")
+  #lines(c(rep(NA,length(real)-nprev),save.pred),col="red") #padded with NA for blanks, plot predictions vs. actual
+  
+  rmse=sqrt(mean((tail(real,nprev)-save.pred)^2)) #compute RMSE
+  mae=mean(abs(tail(real,nprev)-save.pred)) #compute MAE (Mean Absolute Error)
+  errors=c("rmse"=rmse,"mae"=mae) #stack errors in a vector
+  
+  return(list("pred"=save.pred,"coef"=save.coef,"errors"=errors)) #return forecasts, history of estimated coefficients, and RMSE and MAE for the period.
+}
+```
+
+```{r bagging}
+library(randomForest)
+set.seed(759)
+
+MSE <- function(pred, truth){ #start and end body of the function by { } - same as a loop 
+  return(mean((truth - pred)^2)) #end function with a return(output) statement. Here we can go straight to return because the object of interest is a simple function of inputs
+}
+
+bagging <- function(df, val_start, test_start, indice=1) {
+  train = df[df$date < val_start,]
+  val = df[df$date >= val_start & df$date < test_start,]
+  test = df[df$date >= test_start,]
+  
+  X_cols <- setdiff(names(train), c("date", "close_usd_per_troy_oz"))
+  p <- length(X_cols)
+  
+  X_train = train[,X_cols]
+  y_train = train[,indice]
+  X_val = val[,X_cols]
+  y_val = val[,indice]
+  X_test = test[,X_cols]
+  y_test = test[,indice]
+  
+  ntreev = c(10,500,5000) #vector of tree numbers for looping: try 10, 500 and 5000
+  
+  nset = length(ntreev) #number of cases for tree numbers - will determine number of iterations in the loop
+  
+  fmat = matrix(0,nrow(val),nset) #blank matrix for predictions, dimension:sample size by no of cases
+  
+  #Here we will loop over the tree sizes and produce the bagging fit for each
+  for(i in 1:nset) {
+    rffit = randomForest(close_usd_per_troy_oz~.,data=train,ntree=ntreev[i], maxnodes=10)
+    
+    fmat[,i] = predict(rffit, newdata = val) #save each prediction into a separate column of fmat
+    cat("Bagging: ntree =", ntreev[i], "\n")
+  }
+  
+  #We plot the OOB error using the largest ntree case to see how it evolves:
+  #Plotting the RF object will yield the OOB error plot.
+  
+  windows()
+  par(mfrow=c(1,1)) #1x1 plot
+  plot(rffit) #plot the last fitted (largest) OOB error
+  
+  #Now plot the predicted values:
+  oo = order(train$close_usd_per_troy_oz) #ordering for nonlinear plot
+  
+  rffit2 = randomForest(close_usd_per_troy_oz~.,data=train,ntree=5000, mtry=max(1, floor(p / 3)))
+  
+  windows()
+  plot(rffit2, ylim=c(15,50)) #plot the OOB error
+  
+  rffit3 = randomForest(close_usd_per_troy_oz~.,data=train,ntree=5000, mtry=p)
+  windows()
+  plot(rffit3)
+  
+  #Do the plot of RF vs. bagging:
+  xx=seq(1,5000,1)
+  windows()
+  plot(xx,rffit2$mse, type="l",col="blue", ylim=c(15,50), ylab="OOB MSE", xlab="B", main="Bagging vs. Random forest")
+  lines(xx,rffit3$mse, type="l", col="red")
+  legend("topright", c("Random Forest, m=7","Bagging"), lty=c(1,1) ,col=c("blue","red"))
+  
+  #Let's see how bagging does in OOS prediction
+  ybag = predict(rffit3,newdata = test)
+  
+  rmse.bag=sqrt(MSE(test$close_usd_per_troy_oz,ybag)) #compute test RMSE for the tree
+}
+```
+
+```{r statistical accuracy}
+# R^2 OOS
+
+# Diebold-Mariano?
+```
+
+```{r economic value}
 
 ```
+

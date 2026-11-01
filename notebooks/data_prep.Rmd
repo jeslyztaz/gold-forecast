@@ -26,7 +26,8 @@ silver <- read.csv(paste0(path, "silver-price-history.csv")) %>%
   rename(silver_close_usd_per_troy_oz = close_usd_per_troy_oz)
 sp500 <- read.csv(paste0(path, "SP500.csv")) %>%
   select(Date, Price) %>%
-  rename(SP500 = Price)
+  rename(SP500 = Price) %>%
+  mutate(SP500 = as.numeric(gsub(",", "", SP500)))
 t10yie <- read.csv(paste0(path, "T10YIE.csv"))
 epu <- read.csv(paste0(path, "USEPUINDXD.csv"))
 vix <- read.csv(paste0(path, "VIXCLS.csv"))
@@ -124,6 +125,6 @@ forecast_dataset <- forecast_dataset %>%
 ```
 
 ```{r}
-write.csv(forecast_dataset, "../data/forecast_dataset.csv")
+write.csv(forecast_dataset, "../data/forecast_dataset.csv", row.names = FALSE)
 ```
 

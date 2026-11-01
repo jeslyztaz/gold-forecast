@@ -13,20 +13,26 @@ df = read.csv("../data/forecast_dataset.csv")
 ```
 
 ```{r}
-val_start  <- which(dates >= as.Date("2021-01-01"))[1]
-test_start <- which(dates >= as.Date("2023-01-01"))[1]
+val_start  <- as.Date("2021-01-01")
+test_start <- as.Date("2023-01-01")
 ```
 
 ```{r historical average}
 n <- length(df$close_usd_per_troy_oz)
+r <- df$close_usd_per_troy_oz
+ytar <- c(r[-1], NA)
+U  <- which(!is.na(ytar))
+X  <- as.matrix(df[U, ]); y <- ytar[U]; dts <- df$date[U]
+y <- ytar[U]
+dts <- df$date
+TARGET <- "raw"
 
-ha_exp <- sapply(test_start:n, function(t) mean(r[1:(t-1)]))          # expanding
-ha_rol <- sapply(test_start:n, function(t) mean(r[(t-500):(t-1)]))    # 500-day rolling
-y <- df[test_start:n]
-mse <- function(f) mean((y - f)^2)
-
-r2_oos_vs_ha   <- function(f) 1 - mse(f) / mse(ha_exp)
-r2_oos_vs_zero <- function(f) 1 - mse(f) / mean(y^2)
+Nu    <- length(y)
+ha    <- c(NA, cumsum(y)[-Nu] / seq_len(Nu - 1))
+val_idx  <- which(dts >= val_start & dts < test_start); test_idx <- which(dts >= test_start)
+ev_idx   <- c(val_idx, test_idx)                         # contiguous validation + test origins
+cat(sprintf("Target: %s | ", if (TARGET == "raw") "raw gold log return" else "gold excess return"))
+cat(sprintf("Origins %s -> %s | N=%d | p=%d | train %d | val %d | test %d\n", dts[1], dts[length(dts)], length(y), ncol(X), val_idx[1] - 1, length(val_idx), length(test_idx)))
 ```
 
 ```{r lasso using rlasso}

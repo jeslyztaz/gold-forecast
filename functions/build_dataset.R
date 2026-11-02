@@ -1,5 +1,3 @@
-source("setup.R")
-
 build_dataset <- function(root) {
   
   paths <- sort(list.files(

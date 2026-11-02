@@ -2,6 +2,8 @@ source("setup.R")
 source(here("functions", "build_dataset.R"))
 source(here("functions", "get_historical_average.R"))
 source(here("functions", "run_rolling_rlasso.R"))
+source(here("functions", "run_bagging_rf.R"))
+source(here("functions", "compute_metrics.R"))
 
 # create forecast dataset
 data <- build_dataset(here("data", "raw"))
@@ -23,5 +25,18 @@ lasso <- run_rolling_rlasso(data, test_start)
 message("Ran rolling window LASSO")
 postlasso <- run_rolling_rlasso(data, test_start, pl=TRUE)
 message("Ran rolling window post-LASSO")
+
+# run bagging + random forest
+bagging <- run_bagging(data, test_start)
+message("Ran bagging + random forest")
+
+# create consolidated dataframe for metrics
+forecast_results <- bind_rows(
+  make_forecast_results(data, ha$ha, model = "HA"),
+  make_forecast_results(data, lasso$pred, model = "LASSO"),
+  make_forecast_results(data, postlasso$pred, model = "Post-LASSO"),
+  make_forecast_results(data, bagging$pred, model = "Bagging")
+  )
+out <- here("data", "forecast_results.csv")
 
 message("Gold forecast completed successfully.")

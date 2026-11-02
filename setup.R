@@ -3,6 +3,7 @@ library(tools)
 library(readr)
 library(hdm)          # for rlasso()
 library(randomForest) # for bagging and random forest
+library(sandwich)     # for metrics
 library(here)         # project-relative file paths
 
 # Path under outputs/. The parent directory is created when a file is saved.

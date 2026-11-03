@@ -3,6 +3,7 @@ source(here("functions", "build_dataset.R"))
 source(here("functions", "get_historical_average.R"))
 source(here("functions", "run_rolling_rlasso.R"))
 source(here("functions", "run_bagging_rf.R"))
+source(here("functions", "run_ensemble.R"))
 source(here("functions", "build_results_datasets.R"))
 source(here("functions", "compute_metrics.R"))
 
@@ -43,9 +44,16 @@ preds_mean <- forecast_results %>%
   groupby(date) %>%
   summarise(mean_pred = mean(forecast), na.rm = TRUE)
 
-forecast_results <- forecast_results %>%
-  rbind(make_forecast_results(data, preds_mean, model= "Avg Prediction"))
+ensemble <- run_ensemble()
 
-out <- here("data", "forecast_results.csv")
+forecast_results <- forecast_results %>%
+  rbind(
+    make_forecast_results(data, preds_mean, model = "Avg Prediction"),
+    make_forecast_results(data, ensemble$forecasts, model = "Ensemble"))
+
+out2 <- here("data", "forecast_results.csv")
+dir.create(dirname(out2), recursive = TRUE, showWarnings = FALSE)
+write_csv(forecast_results, out2)
+message("Wrote ", nrow(forecast_results), " rows to ", out2)
 
 message("Gold forecast completed successfully.")

@@ -3,6 +3,7 @@ library(tools)
 library(readr)
 library(hdm)          # for rlasso()
 library(randomForest) # for bagging and random forest
+library(lsei)         # for forecast combination
 library(sandwich)     # for metrics
 library(here)         # project-relative file paths
 

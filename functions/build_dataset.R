@@ -16,7 +16,7 @@ build_dataset <- function(root) {
   
   for (i in seq_along(paths)) {
     # Dynamically creates a variable named after clean_names[i]
-    assign(clean_names[i], read.csv(paths[i], fileEncoding = "UTF-8-BOM"))  # SP500.csv starts with a BOM
+    assign(clean_names[i], read.csv(paths[i], fileEncoding = "UTF-8-BOM", na.strings = c("", "NA", ".")))  # SP500.csv starts with a BOM; FRED may use "." for missing
   }
   
   for (name in clean_names) {
@@ -66,8 +66,13 @@ build_dataset <- function(root) {
     if (name != "gold_price_history") {
       df <- get(name)
       date_cols <- names(df)[grepl("date", names(df), ignore.case = TRUE)]
-      forecast_dataset <- forecast_dataset %>%
-        left_join(df, by = c("date" = date_cols[1]))
+      # take the latest observation on or before each trading day (an exact-date join would drop e.g. a monthly
+      # CPI value dated on a weekend); for daily series this gives the same result as the exact join + fill below
+      df <- df[!is.na(df[[date_cols[1]]]), ]                     # drop rows whose date did not parse
+      df <- df[order(df[[date_cols[1]]]), ]
+      i  <- findInterval(as.numeric(forecast_dataset$date), as.numeric(df[[date_cols[1]]]))
+      i[i == 0] <- NA
+      forecast_dataset <- bind_cols(forecast_dataset, df[i, setdiff(names(df), date_cols), drop = FALSE])
     }
   }
   

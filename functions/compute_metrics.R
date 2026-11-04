@@ -29,6 +29,19 @@ calculate_dm <- function(d) {
   c(DM_stat = stat, DM_p = 2 * pt(-abs(stat), df = n - 1))
 }
 
+# Directional accuracy: hit rate (% of periods where the forecast has the right sign) and the Pesaran-Timmermann (1992)
+# test; one-sided H1: predicted signs carry information about realised signs. The test is undefined (NA) when the
+# forecast always has the same sign (e.g. the historical average); compare that model's hit rate with the share of up periods.
+calculate_direction <- function(actual, forecast) {
+  up_a <- actual > 0; up_f <- forecast > 0; n <- length(actual)
+  P  <- mean(up_a == up_f); Py <- mean(up_a); Px <- mean(up_f)
+  Ps <- Py * Px + (1 - Py) * (1 - Px)                                     # hit rate expected if signs were independent
+  vP  <- Ps * (1 - Ps) / n
+  vPs <- ((2 * Py - 1)^2 * Px * (1 - Px) + (2 * Px - 1)^2 * Py * (1 - Py)) / n + 4 * Py * Px * (1 - Py) * (1 - Px) / n^2
+  stat <- if (vP - vPs > 0) (P - Ps) / sqrt(vP - vPs) else NA_real_
+  c(HitRate = 100 * P, PT_stat = stat, PT_p = 1 - pnorm(stat))
+}
+
 # Long/cash strategy: pos = 1 -> hold gold for the next h days, pos = 0 -> hold the T-bill. The portfolio starts in cash,
 # and `cost` (0.1%) is paid on every switch between gold and cash (the first purchase included).
 # gret, rf, pos are per holding period (every h-th origin). Returns the period returns and summary statistics.
@@ -72,11 +85,13 @@ evaluate_models <- function(forecast_results, benchmark = "HA", cost = 0.001, ga
       c(R2_OOS = calculate_r2oos(d$actual, d$forecast, b$forecast),
         calculate_cw(d$actual, d$forecast, b$forecast, h),
         calculate_dm(st$R - bench$R))
-    cer <- calculate_economic_metrics(d$gret[s], d$ret_forecast[s], d$rf[s], d$sig2[s], h, gamma)
-    as_tibble(as.list(c(stats, st$metrics, cer))) %>% mutate(model = m, .before = 1)
+    dirn <- calculate_direction(d$gret[s], d$ret_forecast[s])        # same (non-overlapping) periods as the strategy
+    cer  <- calculate_economic_metrics(d$gret[s], d$ret_forecast[s], d$rf[s], d$sig2[s], h, gamma)
+    as_tibble(as.list(c(stats, dirn, st$metrics, cer))) %>% mutate(model = m, .before = 1)
   }) %>% bind_rows()
 
-  # reference strategies: buy and hold gold, buy and hold cash
-  ref <- function(name, pos) as_tibble(as.list(strat(rep(pos, length(s)))$metrics)) %>% mutate(model = name, .before = 1)
+  # reference strategies: buy and hold gold (its hit rate = share of up periods, the bar a model has to clear), buy and hold cash
+  ref <- function(name, pos) as_tibble(as.list(c(if (pos == 1) calculate_direction(b$gret[s], rep(1, length(s))),
+                                                 strat(rep(pos, length(s)))$metrics))) %>% mutate(model = name, .before = 1)
   bind_rows(res, ref("Buy & hold gold", 1), ref("Buy & hold cash", 0)) %>% arrange(desc(CumRet))
 }

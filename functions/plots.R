@@ -116,4 +116,19 @@ p9 <- bind_rows(tibble(model = "LASSO", date = as.Date(rownames(obj$lasso$select
   labs(title = "Number of predictors selected at each refit", x = NULL, y = "Selected predictors", colour = NULL)
 save_plot(p9, "9_lasso_n_selected", ht = 4)
 
-message("Saved 9 plots to ", output_file("plots"))
+# ---- 10. directional accuracy: hit rate vs the share of up periods (= hit rate of always predicting "up") -------------
+up <- mt$HitRate[mt$model == "Buy & hold gold"]
+p10 <- mt %>% filter(!is.na(HitRate), !model %in% c("Buy & hold gold", "Buy & hold cash")) %>%
+  mutate(stars = cut(PT_p, c(-Inf, 0.01, 0.05, 0.10, Inf), labels = c("***", "**", "*", "")),
+         model = reorder(model, HitRate)) %>%
+  ggplot(aes(HitRate, model)) +
+  geom_col(fill = "#1f77b4") + geom_text(aes(label = stars), hjust = -0.2) +
+  geom_vline(xintercept = up, linetype = "dashed", colour = "red") +
+  annotate("text", x = up, y = 0.6, label = sprintf(" up periods: %.1f%%", up), hjust = 0, colour = "red", size = 3.2) +
+  coord_cartesian(xlim = c(40, max(60, up + 5))) +
+  labs(title = "Directional accuracy (% of periods with the correct sign)",
+       subtitle = "Stars: Pesaran-Timmermann test (* 10%, ** 5%, *** 1%); dashed line = always predicting 'up'",
+       x = "Hit rate (%)", y = NULL)
+save_plot(p10, "10_directional_accuracy", ht = 4.5)
+
+message("Saved 10 plots to ", output_file("plots"))

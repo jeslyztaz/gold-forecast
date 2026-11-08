@@ -1,80 +1,55 @@
-set.seed(759)
-
-MSE <- function(pred, truth){ #start and end body of the function by { } - same as a loop 
-  return(mean((truth - pred)^2)) #end function with a return(output) statement. Here we can go straight to return because the object of interest is a simple function of inputs
-}
-
-runrf <- function(df, test_start, indice=2) {
-  train = df[df$date < test_start,]
-  test = df[df$date >= test_start,]
+run_bagging_rf <- function(md, ntree = 500, refit_every = 21, nodesize = 5, min_train = 250, seed = 4308) {
+  set.seed(seed)
+  ev   <- md$test_idx
+  n_ev <- length(ev)
+  p    <- ncol(md$X)
+  vnames <- colnames(md$X)
   
-  X_cols <- setdiff(names(train), c("date", "close_usd_per_troy_oz"))
-  p <- length(X_cols)
+  # a. tune mtry for RF once, on the initial training window (OOB error)
+  tr0       <- 1:(ev[1] - md$h)
+  mtry_grid <- unique(pmax(1, round(c(p / 6, p / 4, p / 3, p / 2))))
   
-  X_train = train[,X_cols]
-  y_train = train[,indice]
-  X_val = val[,X_cols]
-  y_val = val[,indice]
-  X_test = test[,X_cols]
-  y_test = test[,indice]
+  oob_tune  <- sapply(mtry_grid, function(mt) {
+    rf <- randomForest(md$X[tr0, ], md$y[tr0], ntree = ntree, mtry = mt, nodesize = nodesize)
+    tail(rf$mse, 1) # OOB mean squared error
+  })
   
-  model <- randomForest(x=X_train, y=y_train)   
-  pred <- predict(model, newdata=X_test)
-  return(list("model"=model,"pred"=pred))
-}
-
-run_bagging <- function(df, test_start, indice=2) {
-  train = df[df$date < test_start,]
-  test = df[df$date >= test_start,]
+  mtry_rf <- mtry_grid[which.min(oob_tune)]
+  print(data.frame(mtry = mtry_grid, OOB_MSE = oob_tune))
+  cat("Chosen mtry for RF:", mtry_rf, " (bagging uses mtry =", p, ")\n")
   
-  X_cols <- setdiff(names(train), c("date", "close_usd_per_troy_oz"))
-  p <- length(X_cols)
+  # b. expanding-window forecasts
+  f_bag <- f_rf <- numeric(n_ev)
+  imp_bag <- imp_rf <- setNames(numeric(p), vnames)
+  oob_bag <- oob_rf <- numeric(ntree)
+  n_refit <- 0
   
-  X_train = train[,X_cols]
-  y_train = train[,indice]
-  X_test = test[,X_cols]
-  y_test = test[,indice]
-  
-  ntreev = c(10,500,5000)
-  nset = length(ntreev)
-  
-  fmat = matrix(0,nrow(train),nset)
-  
-  for(i in 1:nset) {
-    rffit = randomForest(x=X_train, y=y_train, ntree=ntreev[i], maxnodes=10)
-    fmat[,i] = predict(rffit)
-    cat("Bagging: ntree =", ntreev[i], "\n")
+  for (i in seq_len(n_ev)) {
+    t <- ev[i]
+    if ((i - 1) %% refit_every == 0) { # refit models
+      tr <- 1:(t - md$h) # only targets already realised at t
+      stopifnot(length(tr) >= min_trin)a
+      m_bag <- randomForest(md$X[tr, ], md$y[tr], ntree = ntree, mtry = p, nodesize = nodesize)
+      m_rf  <- randomForest(md$X[tr, ], md$y[tr], ntree = ntree, mtry = mtry_rf, nodesize = nodesize)
+      m_rfd <- randomForest(md$X[tr, ], md$y[tr], ntree = ntree) # all settings at their defaults
+      imp_bag <- imp_bag + importance(m_bag)[, "IncNodePurity"]; oob_bag <- oob_bag + m_bag$mse
+      imp_rf  <- imp_rf  + importance(m_rf)[,  "IncNodePurity"]; oob_rf  <- oob_rf  + m_rf$mse
+      imp_rfd <- imp_rfd + importance(m_rfd)[, "IncNodePurity"]; oob_rfd <- oob_rfd + m_rfd$mse
+      n_refit <- n_refit + 1
+      cat("Forests refit", n_refit, "| origin", i, "of", n_ev, "\n")
+    }
+    f_bag[i] <- predict(m_bag, md$X[t, , drop = FALSE])
+    f_rf[i]  <- predict(m_rf,  md$X[t, , drop = FALSE])
+    f_rfd[i] <- predict(m_rfd, md$X[t, , drop = FALSE])
   }
   
-  #We plot the OOB error using the largest ntree case to see how it evolves:
-  #Plotting the RF object will yield the OOB error plot.
-  
-  windows()
-  par(mfrow=c(1,1)) #1x1 plot
-  plot(rffit) #plot the last fitted (largest) OOB error
-  
-  #Now plot the predicted values:
-  oo = order(y_train) #ordering for nonlinear plot
-  
-  rffit2 = randomForest(x=X_train, y=y_train, ntree=5000, mtry=max(1, floor(p / 3)))
-  
-  windows()
-  plot(rffit2) #plot the OOB error
-  
-  rffit3 = randomForest(x=X_train, y=y_train, ntree=5000, mtry=p)
-  windows()
-  plot(rffit3)
-  
-  #Do the plot of RF vs. bagging:
-  xx=seq(1,5000,1)
-  windows()
-  plot(xx,rffit2$mse, type="l",col="blue", ylab="OOB MSE", xlab="B", main="Bagging vs. Random forest")
-  lines(xx,rffit3$mse, type="l", col="red")
-  legend("topright", c("Random Forest, m=7","Bagging"), lty=c(1,1) ,col=c("blue","red"))
-  
-  #Let's see how bagging does in OOS prediction
-  ybag = predict(rffit3, newdata = X_test)
-  return(ybag)
-  
-  #rmse.bag=sqrt(MSE(test$close_usd_per_troy_oz,ybag)) #compute test RMSE for the tree
+  te <- seq_along(md$test_idx)
+  return(list(
+    bagging = list(pred_test = f_bag[te], importance = imp_bag / n_refit,
+                   oob_mse = oob_bag / n_refit),
+    rf = list(pred_test = f_rf[te], importance = imp_rf / n_refit, oob_mse = oob_rf / n_refit, 
+              mtry = mtry_rf, mtry_tuning = data.frame(mtry = mtry_grid, oob_mse = oob_tune)),
+    rf_default = list(pred_val = f_rfd[seq_len(n_val)], pred_test = f_rfd[te],
+                      importance = imp_rfd / n_refit, oob_mse = oob_rfd / n_refit, 
+                      mtry = floor(p / 3))))
 }

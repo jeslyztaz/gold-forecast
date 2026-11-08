@@ -1,7 +1,8 @@
-get_historical_average <- function(df, indice = 2) {
-  n <- nrow(df)
-  ha <- df[, 1:2] # Keep date and gold price columns
-  y <- df[, indice]
-  ha$ha <- cumsum(y) / seq_along(y)
-  return(ha)
+get_historical_average <- function(md) {
+  n <- length(md$y)
+  h <- md$h
+  pred <- rep(NA_real_, n)
+  idx <- (h + 1):n
+  pred[idx] <- cumsum(md$y)[idx - h] / (idx - h)
+  return(pred_test = pred[md$test_idx])
 }

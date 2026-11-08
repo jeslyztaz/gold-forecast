@@ -1,6 +1,9 @@
 library(tidyverse)    # data manipulation
 library(tools)
 library(readr)
+library(readxl)
+library(zoo)          # for moving average
+library(tseries)      # for ADF test
 library(hdm)          # for rlasso()
 library(randomForest) # for bagging and random forest
 library(lsei)         # for forecast combination

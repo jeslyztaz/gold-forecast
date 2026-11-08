@@ -23,30 +23,16 @@ test_start <- as.Date("2023-01-01")
 ```
 
 ```{r historical average}
-h <- 5  # 1 = daily, 5 = weekly, 20 = monthly
 n <- nrow(df)
-r <- df$close_usd_per_troy_oz
+ha <- df[, 1:2] # Keep date and gold price columns
+y <- df[, indice]
+ha$ha <- cumsum(y) / seq_along(y)
 
-# Construct h-step-ahead log return
-ytar <- c(r[-h], NA)
-
-U <- which(!is.na(ytar))
-X   <- as.matrix(df[U, ])
-y   <- ytar[U]
-dts <- df$date[U]
-Nu <- length(y)
-
-ha <- c(rep(NA, h), cumsum(y)[seq_len(Nu - h)] / seq_len(Nu - h))
-
-val_idx  <- which(dts >= val_start & dts < test_start)
-test_idx <- which(dts >= test_start)
-ev_idx <- c(val_idx, test_idx)
-
-cat(sprintf("Target: %d-day-ahead gold raw price | ", h))
-cat(sprintf(
-  "Origins %s -> %s | N=%d | p=%d | train %d | val %d | test %d\n",
-  dts[1], dts[length(dts)], length(y), ncol(X), val_idx[1] - 1, length(val_idx),
-  length(test_idx)))
+# cat(sprintf("Target: %d-day-ahead gold raw price | ", h))
+# cat(sprintf(
+#   "Origins %s -> %s | N=%d | p=%d | train %d | val %d | test %d\n",
+#   dts[1], dts[length(dts)], length(y), ncol(X), val_idx[1] - 1, length(val_idx),
+#   length(test_idx)))
 ```
 
 ```{r}
@@ -72,7 +58,7 @@ runrlasso <- function(df, indice, pl=FALSE) {
 ```
 
 ```{r}
-rlasso.rolling.window <- function(Y, test_start,indice=1, pl=FALSE){
+rlasso.rolling.window <- function(Y, test_start,indice=2, pl=FALSE){
   nprev = sum(Y$date >= test_start, na.rm = TRUE)
   save.coef=matrix(NA, nprev, ncol(Y)) #blank matrix for coefficients at each iteration
   save.pred=matrix(NA, nprev, 1) #blank for forecasts
@@ -104,7 +90,7 @@ MSE <- function(pred, truth){ #start and end body of the function by { } - same 
   return(mean((truth - pred)^2)) #end function with a return(output) statement. Here we can go straight to return because the object of interest is a simple function of inputs
 }
 
-bagging <- function(df, val_start, test_start, indice=1) {
+bagging <- function(df, val_start, test_start, indice=2) {
   train = df[df$date < val_start,]
   val = df[df$date >= val_start & df$date < test_start,]
   test = df[df$date >= test_start,]

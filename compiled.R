@@ -413,7 +413,7 @@ run_rlasso <- function(md, post = FALSE) {
   p <- ncol(md$X)
   ev <- md$test_idx
   f <- length(md$test_idx)
-  sel <- matrix(0, f, p, dimnames = list(NULL, colnames(md$X)))
+  sel <- matrix(0, f, p, dimnames = list(format(md$date[ev]), colnames(md$X)))
   
   for (i in seq_len(f)) {
     t  = ev[i]
@@ -502,7 +502,7 @@ run_ensemble <- function(md, models, ha, theta = 0.9, min_obs = 60) {
   f_dmspe <- f_con <- f_unc <- numeric(n_test)
   
   for (j in seq_len(n_test)) {
-    past <- seq_len(j - md$h) # forecasts whose target is realised by t
+    past <- seq_len(max(j - md$h, 0)) # forecasts whose target is realised by t
     Fi <- Fev[j, ]
     
     if (length(past) >= min_obs) {
@@ -625,7 +625,7 @@ evaluate_models <- function(forecast_results, benchmark = "HA", cost = 0.001, ga
   forecast_results <- forecast_results %>% 
     arrange(model, date)
   
-  obj <- readRDS(output_file("model_objects.rds"))
+  obj <- readRDS(paste0("outputs/model_objects_h", h, ".rds"))
   h  <- unique(forecast_results$horizon)
   stopifnot(length(h) == 1)
   
@@ -641,9 +641,12 @@ evaluate_models <- function(forecast_results, benchmark = "HA", cost = 0.001, ga
   bench <- strat(as.numeric(b$ret_forecast[s] > 0))
   
   res <- lapply(unique(forecast_results$model), function(m) {
-    d <- forecast_results %>% filter(model == m)
+    d <- forecast_results %>% 
+      filter(model == m)
+    
     stopifnot(nrow(d) == nrow(b), all(d$date == b$date), !anyNA(d$forecast))
     st <- strat(as.numeric(d$ret_forecast[s] > 0))
+    
     stats <- if (m == benchmark) {
       c(R2_OOS = NA, CW_stat = NA, CW_p = NA, DM_stat = NA, DM_p = NA)
       } 
@@ -654,7 +657,8 @@ evaluate_models <- function(forecast_results, benchmark = "HA", cost = 0.001, ga
     
     dirn <- calculate_direction(d$gret[s], d$ret_forecast[s])
     cer  <- calculate_econ_metrics(d$gret[s], d$ret_forecast[s], d$rf[s], d$sig2[s], h, gamma)
-    as_tibble(as.list(c(stats, dirn, st$metrics, cer))) %>% mutate(model = m, .before = 1)
+    as_tibble(as.list(c(stats, dirn, st$metrics, cer))) %>% 
+      mutate(model = m, .before = 1)
   }) %>% 
     bind_rows()
   
@@ -679,7 +683,7 @@ plots <- function(forecast_results, metrics) {
   forecast_results <- forecast_results %>% 
     mutate(model = factor(model, levels = unique(model)))
   
-  obj <- readRDS("outputs/model_objects.rds")
+  obj <- readRDS(paste0("outputs/model_objects_h", h, ".rds"))
   theme_set(theme_minimal(base_size = 11))
   
   # actual vs predicted gold price (price at t+h) over the last 90 days
@@ -866,12 +870,31 @@ plots <- function(forecast_results, metrics) {
   
   save_plot(p10, paste0("h", h, "_10_directional_accuracy"), ht = 4.5)
   
-  message("Saved 10 plots to ", "outputs/plots/")
+  # recursive combination weights over the test period
+  w <- obj$ensemble$weights
+  p11 <- bind_rows(
+    as_tibble(w$dmspe) %>% 
+      mutate(date = w$date, method = "DMSPE"),
+    as_tibble(w$gr_constrained) %>% 
+      mutate(date = w$date, method = "GR constrained (>= 0, sum to 1)"),
+    as_tibble(w$gr_unconstrained[, -1, drop = FALSE]) %>% 
+      mutate(date = w$date, method = "GR unconstrained (slopes; intercept not shown)")) %>%
+    pivot_longer(-c(date, method), names_to = "model", values_to = "weight") %>%
+    ggplot(aes(date, weight, colour = model)) +
+    geom_hline(yintercept = 0, colour = "grey70") + 
+    geom_line(linewidth = 0.6) +
+    facet_wrap(~ method, ncol = 1, scales = "free_y") +
+    labs(title = paste0("Combination weights at each test origin, h = ", h), 
+         x = NULL, y = "Weight", colour = NULL) + 
+    theme(legend.position = "top")
+  save_plot(p11, paste0("h", h, "_11_combination_weights"), ht = 8)
+  
+  message("Saved 11 plots to ", "outputs/plots/")
 }
 
 fc_data <- build_dataset("data/raw/")
 
-horizons <- 1 #c(1, 5, 20)
+horizons <- c(1, 5, 20)
 train_start <- as.Date("2015-01-01")
 test_start <- as.Date("2022-01-01")
 
@@ -905,6 +928,10 @@ for (h in horizons) {
   
   write.csv(forecast_results, paste0("outputs/forecast_results_h", h, ".csv"), row.names = FALSE)
   write.csv(metrics, paste0("outputs/metrics_h", h, ".csv"), row.names = FALSE)
+  write_csv(md$transforms, paste0("outputs/transforms_h", h, ".csv"))
+  saveRDS(list(lasso = f_lasso, postlasso = f_plasso, bagging = f_bagging, rf = f_rf, 
+               ensemble = f_ensemble),
+          paste0("outputs/model_objects_h", h, ".rds"))
   
   plots(forecast_results, metrics)
 }

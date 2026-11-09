@@ -28,7 +28,7 @@ run_bagging_rf <- function(md, ntree = 500, refit_every = 21, nodesize = 5, min_
     t <- ev[i]
     if ((i - 1) %% refit_every == 0) { # refit models
       tr <- 1:(t - md$h) # only targets already realised at t
-      stopifnot(length(tr) >= min_trin)a
+      stopifnot(length(tr) >= min_trin)
       m_bag <- randomForest(md$X[tr, ], md$y[tr], ntree = ntree, mtry = p, nodesize = nodesize)
       m_rf  <- randomForest(md$X[tr, ], md$y[tr], ntree = ntree, mtry = mtry_rf, nodesize = nodesize)
       m_rfd <- randomForest(md$X[tr, ], md$y[tr], ntree = ntree) # all settings at their defaults
@@ -49,7 +49,6 @@ run_bagging_rf <- function(md, ntree = 500, refit_every = 21, nodesize = 5, min_
                    oob_mse = oob_bag / n_refit),
     rf = list(pred_test = f_rf[te], importance = imp_rf / n_refit, oob_mse = oob_rf / n_refit, 
               mtry = mtry_rf, mtry_tuning = data.frame(mtry = mtry_grid, oob_mse = oob_tune)),
-    rf_default = list(pred_val = f_rfd[seq_len(n_val)], pred_test = f_rfd[te],
-                      importance = imp_rfd / n_refit, oob_mse = oob_rfd / n_refit, 
-                      mtry = floor(p / 3))))
+    rf_default = list(pred_test = f_rfd[te], importance = imp_rfd / n_refit, 
+                      oob_mse = oob_rfd / n_refit, mtry = floor(p / 3))))
 }

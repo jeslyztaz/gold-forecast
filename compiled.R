@@ -242,7 +242,8 @@ build_dataset <- function(root) {
           align = "right",
           fill = NA)
     ) %>%
-    filter(date >= "2015-01-01" & date <= "2025-12-31") # keep 10 years of data
+    # add 1 year to lower bound since subsequent computations required up to 1 year of data
+    filter(date >= "2014-01-01" & date <= "2025-12-31")
   
   return(forecast_dataset)
 }
@@ -251,7 +252,7 @@ dlog <- function(x, k = 1) {
   log(x / lag(x, n = k))
 }
 
-prepare_model_data <- function(fc_data, h = 1, test_start, target = c("logreturn", "change")) {
+prepare_model_data <- function(fc_data, h = 1, train_start, test_start, target = c("logreturn", "change")) {
   target <- match.arg(target)
   fc_data <- fc_data[order(fc_data$date), ]
   p  <- fc_data$close_usd_per_troy_oz
@@ -351,7 +352,7 @@ prepare_model_data <- function(fc_data, h = 1, test_start, target = c("logreturn
   levels_ <- intersect(c("DAAA", "DBAA", "DGS10", "T10YIE", "WTB3MS", "TMS", "DFY", "VIXCLS", 
                          "EPU", "RVOL_20", "RVOL_60", "eq_rvol", 
                          grep("^log_.*GPR", names(F), value = TRUE)), names(F))
-  train_rows <- which(fc_data$date < test_start)
+  train_rows <- which(fc_data$date >= train_start & fc_data$date < test_start)
   transforms <- do.call(rbind, lapply(levels_, function(v) {
     x  <- F[[v]][train_rows]; x <- x[!is.na(x)]
     pv <- suppressWarnings(adf.test(x)$p.value)
@@ -398,12 +399,14 @@ prepare_model_data <- function(fc_data, h = 1, test_start, target = c("logreturn
 }
 
 get_historical_average <- function(md) {
+  #message("Computing historical average")
   n <- length(md$y)
   h <- md$h
   pred <- rep(NA_real_, n)
   idx <- (h + 1):n
   pred[idx] <- cumsum(md$y)[idx - h] / (idx - h)
-  return(pred_test = pred[md$test_idx])
+  #message("Completed historical average calculation")
+  return(list(pred_test = pred[md$test_idx]))
 }
 
 run_rlasso <- function(md, post = FALSE) {
@@ -420,6 +423,8 @@ run_rlasso <- function(md, post = FALSE) {
     b[is.na(b)] <- 0
     f[i] <- b[1] + sum(md$X[t, ] * b[-1]) # forecast = intercept + x_t' beta
     sel[i, ] <- as.numeric(b[-1] != 0)
+    #cat("rlasso", if (post) "(post)" else "", "refit", i, "of", length(ev), "| selected:", 
+    #   sum(m$index), "\n")
   }
   
   return(list(pred_test  = f, n_selected = rowSums(sel), selected = sel == 1))
@@ -436,26 +441,26 @@ run_bagging_rf <- function(md, ntree = 500, refit_every = 21, nodesize = 5, min_
   tr0       <- 1:(ev[1] - md$h)
   mtry_grid <- unique(pmax(1, round(c(p / 6, p / 4, p / 3, p / 2))))
   
-  oob_tune  <- sapply(mtry_grid, function(mt) {
-    rf <- randomForest(md$X[tr0, ], md$y[tr0], ntree = ntree, mtry = mt, nodesize = nodesize)
+  oob_tune  <- sapply(mtry_grid, function(metrics) {
+    rf <- randomForest(md$X[tr0, ], md$y[tr0], ntree = ntree, mtry = metrics, nodesize = nodesize)
     tail(rf$mse, 1) # OOB mean squared error
   })
   
   mtry_rf <- mtry_grid[which.min(oob_tune)]
   print(data.frame(mtry = mtry_grid, OOB_MSE = oob_tune))
-  cat("Chosen mtry for RF:", mtry_rf, " (bagging uses mtry =", p, ")\n")
+  cat("Chosen mtry for RF:", mtry_rf, "(bagging uses mtry =", p, ")\n")
   
   # b. expanding-window forecasts
-  f_bag <- f_rf <- numeric(n_ev)
-  imp_bag <- imp_rf <- setNames(numeric(p), vnames)
-  oob_bag <- oob_rf <- numeric(ntree)
+  f_bag <- f_rf <- f_rfd <- numeric(n_ev)
+  imp_bag <- imp_rf <- imp_rfd <- setNames(numeric(p), vnames)
+  oob_bag <- oob_rf <- oob_rfd <- numeric(ntree)
   n_refit <- 0
   
   for (i in seq_len(n_ev)) {
     t <- ev[i]
     if ((i - 1) %% refit_every == 0) { # refit models
       tr <- 1:(t - md$h) # only targets already realised at t
-      stopifnot(length(tr) >= min_trin)a
+      stopifnot(length(tr) >= min_train)
       m_bag <- randomForest(md$X[tr, ], md$y[tr], ntree = ntree, mtry = p, nodesize = nodesize)
       m_rf  <- randomForest(md$X[tr, ], md$y[tr], ntree = ntree, mtry = mtry_rf, nodesize = nodesize)
       m_rfd <- randomForest(md$X[tr, ], md$y[tr], ntree = ntree) # all settings at their defaults
@@ -476,49 +481,58 @@ run_bagging_rf <- function(md, ntree = 500, refit_every = 21, nodesize = 5, min_
                    oob_mse = oob_bag / n_refit),
     rf = list(pred_test = f_rf[te], importance = imp_rf / n_refit, oob_mse = oob_rf / n_refit, 
               mtry = mtry_rf, mtry_tuning = data.frame(mtry = mtry_grid, oob_mse = oob_tune)),
-    rf_default = list(pred_val = f_rfd[seq_len(n_val)], pred_test = f_rfd[te],
-                      importance = imp_rfd / n_refit, oob_mse = oob_rfd / n_refit, 
-                      mtry = floor(p / 3))))
+    rf_default = list(pred_test = f_rfd[te], importance = imp_rfd / n_refit, 
+                      oob_mse = oob_rfd / n_refit, mtry = floor(p / 3))))
 }
 
 run_ensemble <- function(md, models, ha, theta = 0.9, min_obs = 60) {
-  Fev <- sapply(models, function(m) m$pred_test) # test forecasts, one column per model
+  pred_list <- lapply(names(models), function(nm) {
+    as.numeric(models[[nm]]$pred_test)
+  })
+  Fev <- do.call(cbind, pred_list) # test forecasts, one column per model
+  colnames(Fev) <- names(models)
   yev <- md$y[md$test_idx]
   stopifnot(nrow(Fev) == length(yev), !anyNA(Fev))
-  k <- ncol(Fev); nm <- colnames(Fev); n_val <- length(md$val_idx); n_test <- length(md$test_idx)
+  k <- ncol(Fev)
+  nm <- colnames(Fev)
+  n_test <- length(md$test_idx)
   
   w_dmspe <- w_con <- matrix(1 / k, n_test, k, dimnames = list(NULL, nm))
   w_unc   <- matrix(NA_real_, n_test, k + 1, dimnames = list(NULL, c("Intercept", nm)))
   f_dmspe <- f_con <- f_unc <- numeric(n_test)
   
   for (j in seq_len(n_test)) {
-    i <- n_val + j # position of this test origin in Fev
-    past <- seq_len(i - md$h) # forecasts whose target is realised by t
-    Fi <- Fev[i, ]
+    past <- seq_len(j - md$h) # forecasts whose target is realised by t
+    Fi <- Fev[j, ]
+    
     if (length(past) >= min_obs) {
-      A <- Fev[past, , drop = FALSE]; b <- yev[past]
+      A <- Fev[past, , drop = FALSE]
+      b <- yev[past]
       # DMSPE: weights inversely proportional to discounted past squared errors (theta = 0.9)
       phi <- colSums(theta^(max(past) - past) * (b - A)^2)
       w_dmspe[j, ] <- (1 / phi) / sum(1 / phi)
       # Granger-Ramanathan: (i) constrained, weights >= 0 summing to 1, no intercept; 
       # (ii) unrestricted OLS with intercept
       w_con[j, ] <- as.numeric(lsei(a = A, b = b, c = rep(1, k), d = 1, lower = 0))
-      cf <- lm.fit(cbind(1, A), b)$coefficients; cf[is.na(cf)] <- 0
+      cf <- lm.fit(cbind(1, A), b)$coefficients 
+      cf[is.na(cf)] <- 0
       w_unc[j, ] <- cf
-    } else {
+    } 
+    else {
       w_unc[j, ] <- c(0, rep(1 / k, k)) # too little history: equal weights
     }
+    
     f_dmspe[j] <- sum(Fi * w_dmspe[j, ])
     f_con[j] <- sum(Fi * w_con[j, ])
     f_unc[j] <- w_unc[j, 1] + sum(Fi * w_unc[j, -1])
   }
   
-  F_test <- Fev[n_val + seq_len(n_test), , drop = FALSE]
-  f_mean <- rowMeans(F_test)
+  f_mean <- rowMeans(Fev)
+  
   return(list(
     pred_test = list(
       "Ens: mean" = f_mean,
-      "Ens: median" = apply(F_test, 1, median),
+      "Ens: median" = apply(Fev, 1, median),
       "Ens: mean + HA" = 0.5 * f_mean + 0.5 * as.numeric(ha$pred_test),
       "Ens: DMSPE" = f_dmspe,
       "Ens: GR constrained" = f_con,
@@ -541,31 +555,356 @@ make_forecast_results <- function(md, pred_test, model) {
          price_actual = P0 * (1 + md$gret[i]), gret = md$gret[i], rf = md$rf[i], sig2 = md$sig2[i])
 }
 
-fc_data <- build_dataset("data/raw")
+# out-of-sample R2 in percent (positive = better than the benchmark)
+# statistical benchmark used by Risse (2019)
+calculate_r2oos <- function(actual, forecast, benchmark) {
+  100 * (1 - sum((actual - forecast)^2) / sum((actual - benchmark)^2))
+}
 
-horizons <- c(1, 5, 20)
+# Clark-West (2007) test for nested models; one-sided H1: the model beats the benchmark.
+# statistical benchmark used by Risse (2019)
+calculate_cw <- function(actual, forecast, benchmark, h = 1) {
+  f   <- (actual - benchmark)^2 - (actual - forecast)^2 + (benchmark - forecast)^2
+  fit <- lm(f ~ 1)
+  V   <- NeweyWest(fit, lag = max(h - 1, 0), prewhite = FALSE, adjust = TRUE)
+  stat <- unname(coef(fit)[1] / sqrt(V[1, 1]))
+  c(CW_stat = stat, CW_p = 1 - pnorm(stat))
+}
+
+# Diebold-Mariano on profits
+calculate_dm <- function(d) {
+  n <- length(d)
+  if (sd(d) == 0) return(c(DM_stat = NA_real_, DM_p = NA_real_))
+  stat <- mean(d) / sqrt(var(d) / n) * sqrt((n - 1) / n)
+  c(DM_stat = stat, DM_p = 2 * pt(-abs(stat), df = n - 1))
+}
+
+# Directional accuracy: hit rate (% of periods where the forecast has the right sign) and 
+# the Pesaran-Timmermann (1992) test; 
+# one-sided H1: predicted signs carry information about realised signs. The test is undefined (NA) 
+# when the forecast always has the same sign (e.g. the historical average); 
+# compare that model's hit rate with the share of up periods
+calculate_direction <- function(actual, forecast) {
+  up_a <- actual > 0; up_f <- forecast > 0; n <- length(actual)
+  P  <- mean(up_a == up_f); Py <- mean(up_a); Px <- mean(up_f)
+  Ps <- Py * Px + (1 - Py) * (1 - Px) # hit rate expected if signs were independent
+  vP  <- Ps * (1 - Ps) / n
+  vPs <- ((2 * Py - 1)^2 * Px * (1 - Px) + (2 * Px - 1)^2 * Py * (1 - Py)) / n + 4 * Py * Px * (1 - Py) * (1 - Px) / n^2
+  stat <- if (vP - vPs > 0) (P - Ps) / sqrt(vP - vPs) else NA_real_
+  c(HitRate = 100 * P, PT_stat = stat, PT_p = 1 - pnorm(stat))
+}
+
+# long/cash strategy: long gold if forecast > 0 
+# cost (0.1%) is paid on every switch between gold and cash
+calculate_strategy <- function(gret, rf, pos, cost = 0.001, h = 1, periods_per_year = 252) {
+  trades <- abs(diff(c(0, pos)))
+  R  <- pos * gret + (1 - pos) * rf - cost * trades
+  W  <- c(1, cumprod(1 + R)) # wealth path
+  sd_ex <- sd(R - rf); ppy <- periods_per_year / h # holding periods per year
+  list(R = R,
+       metrics = c(CumRet = 100 * (W[length(W)] - 1), # cumulative return, %
+                   CAGR = 100 * (W[length(W)]^(ppy / length(R)) - 1), # annualised return, %
+                   AnnVol = 100 * sd(R) * sqrt(ppy), # annualised volatility, %
+                   Sharpe = if (sd_ex > 0) sqrt(ppy) * mean(R - rf) / sd_ex else NA_real_,
+                   MaxDrawdown  = 100 * min(W / cummax(W) - 1), # maximum drawdown, %
+                   Trades = sum(trades),
+                   PctInGold = 100 * mean(pos)))
+}
+
+# Risse (2019) mean-variance investor (gamma = 3):
+# weight on gold = (forecast - rf) / (gamma * variance), bounded to [w_min, w_max]
+# returns the annualised certainty-equivalent return in % per year
+calculate_econ_metrics <- function(gret, ret_forecast, rf, sig2, h = 1, gamma = 3,
+                                       w_min = -0.5, w_max = 1.5, periods_per_year = 252) {
+  w  <- pmin(pmax((ret_forecast - rf) / (gamma * sig2), w_min), w_max)
+  Rp <- w * gret + (1 - w) * rf
+  c(CER_Risse = 100 * (periods_per_year / h) * (mean(Rp) - 0.5 * gamma * var(Rp)))
+}
+
+evaluate_models <- function(forecast_results, benchmark = "HA", cost = 0.001, gamma = 3) {
+  forecast_results <- forecast_results %>% 
+    arrange(model, date)
+  
+  obj <- readRDS(output_file("model_objects.rds"))
+  h  <- unique(forecast_results$horizon)
+  stopifnot(length(h) == 1)
+  
+  b  <- forecast_results %>% 
+    filter(model == benchmark)
+  
+  if (!nrow(b)) {
+    stop("Benchmark '", benchmark, "' not found in forecast_results")
+  }
+  
+  s     <- seq(1, nrow(b), by = h)
+  strat <- function(pos) calculate_strategy(b$gret[s], b$rf[s], pos, h = h)
+  bench <- strat(as.numeric(b$ret_forecast[s] > 0))
+  
+  res <- lapply(unique(forecast_results$model), function(m) {
+    d <- forecast_results %>% filter(model == m)
+    stopifnot(nrow(d) == nrow(b), all(d$date == b$date), !anyNA(d$forecast))
+    st <- strat(as.numeric(d$ret_forecast[s] > 0))
+    stats <- if (m == benchmark) {
+      c(R2_OOS = NA, CW_stat = NA, CW_p = NA, DM_stat = NA, DM_p = NA)
+      } 
+    else {
+      c(R2_OOS = calculate_r2oos(d$actual, d$forecast, b$forecast),
+        calculate_cw(d$actual, d$forecast, b$forecast, h), calculate_dm(st$R - bench$R))
+    }
+    
+    dirn <- calculate_direction(d$gret[s], d$ret_forecast[s])
+    cer  <- calculate_econ_metrics(d$gret[s], d$ret_forecast[s], d$rf[s], d$sig2[s], h, gamma)
+    as_tibble(as.list(c(stats, dirn, st$metrics, cer))) %>% mutate(model = m, .before = 1)
+  }) %>% 
+    bind_rows()
+  
+  # reference strategies: buy and hold gold (its hit rate = share of up periods, the bar a model has to clear), buy and hold cash
+  ref <- function(name, pos) {
+    as_tibble(as.list(c(if (pos == 1) calculate_direction(b$gret[s], rep(1, length(s))),
+                        strat(rep(pos, length(s)))$metrics))) %>% 
+      mutate(model = name, .before = 1)
+  }
+  
+  bind_rows(res, ref("Buy & hold gold", 1), ref("Buy & hold cash", 0)) %>% 
+    arrange(desc(CumRet))
+}
+
+plots <- function(forecast_results, metrics) {
+  
+  save_plot <- function(p, name, w = 10, ht = 6) {
+    ggsave(paste0("outputs/plots/", name, ".png"), p, width = w, height = ht, dpi = 150, 
+           bg = "white")
+  }
+  
+  forecast_results <- forecast_results %>% 
+    mutate(model = factor(model, levels = unique(model)))
+  
+  obj <- readRDS("outputs/model_objects.rds")
+  theme_set(theme_minimal(base_size = 11))
+  
+  # actual vs predicted gold price (price at t+h) over the last 90 days
+  p1 <- forecast_results %>% 
+    filter(date > max(date) - 90) %>%
+    ggplot(aes(date)) +
+    geom_line(aes(y = price_actual, colour = "Actual"), linewidth = 0.4) +
+    geom_line(aes(y = price_forecast, colour = "Predicted"), linewidth = 0.4) +
+    facet_wrap(~ model, ncol = 2) +
+    scale_colour_manual(values = c(Actual = "grey55", Predicted = "#1f77b4"), name = NULL) +
+    labs(
+      title = sprintf("Actual vs. Predicted gold price (%d-day ahead, last 90 days of the test period)", h),
+      x = "Forecast origin", y = "USD per troy oz") + theme(legend.position = "top")
+  
+  save_plot(p1, paste0("h", h, "_1_actual_vs_predicted_price"), ht = 8)
+  
+  # actual vs predicted target
+  p2 <- forecast_results %>%
+    ggplot(aes(forecast, actual)) +
+    geom_point(alpha = 0.25, size = 0.8) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", colour = "red") +
+    geom_smooth(method = "lm", se = FALSE, linewidth = 0.6, formula = y ~ x) +
+    facet_wrap(~ model, ncol = 3, scales = "free_x") +
+    labs(title = paste0("Predicted vs. Realised Log Returns (Test Period), h = ", h), 
+         x = "Predicted", y = "Actual")
+  
+  save_plot(p2, paste0("h", h, "_2_actual_vs_predicted_scatter"), ht = 7)
+  
+  # cumulative squared-error difference vs. historical average
+  ha  <- forecast_results %>% 
+    filter(model == "HA") %>% 
+    select(date, ha_forecast = forecast)
+  
+  p3 <- forecast_results %>% 
+    filter(model != "HA") %>% 
+    left_join(ha, by = "date") %>%
+    group_by(model) %>% 
+    arrange(date) %>%
+    mutate(csfe = cumsum((actual - ha_forecast)^2 - (actual - forecast)^2)) %>%
+    ggplot(aes(date, csfe, colour = model)) +
+    geom_hline(yintercept = 0, colour = "grey50") + geom_line(linewidth = 0.6) +
+    labs(title = paste0("Cumulative Squared-Error Difference vs. Historical Average, h = ", h),
+         x = NULL, y = "Cumulative (e_HA^2 - e_model^2)", colour = NULL) + 
+    theme(legend.position = "top")
+  
+  save_plot(p3, paste0("h", h, "_3_cumulative_error_difference"))
+  
+  # out-of-sample R^2 vs the historical average (stars: Clark-West test, * 10%, ** 5%, *** 1%)
+  p4 <- metrics %>% 
+    filter(!is.na(R2_OOS)) %>%
+    mutate(stars = cut(CW_p, c(-Inf, 0.01, 0.05, 0.10, Inf), labels = c("***", "**", "*", "")),
+           model = reorder(model, R2_OOS)) %>%
+    ggplot(aes(R2_OOS, model, fill = R2_OOS > 0)) +
+    geom_col(show.legend = FALSE) + 
+    geom_text(aes(label = stars), hjust = -0.2) +
+    scale_fill_manual(values = c(`TRUE` = "#2ca02c", `FALSE` = "#d62728")) +
+    scale_x_continuous(expand = expansion(mult = c(0.05, 0.15))) +
+    labs(title = paste0("Out-of-Sample R^2 vs. Historical Average (%), h = ", h), 
+         x = "R2_OOS (%)", y = NULL)
+  
+  save_plot(p4, paste0("h", h, "_4_r2_oos"), ht = 4.5)
+  
+  # trading strategy: growth of 1 invested
+  b <- forecast_results %>% 
+    filter(model == "HA") %>% 
+    arrange(date)
+  
+  s <- seq(1, nrow(b), by = h)
+  
+  wealth <- function(name, pos) {
+    tibble(model = name, date = b$date[s],
+           wealth = cumprod(1 + calculate_strategy(b$gret[s], b$rf[s], pos, h = h)$R))
+  }
+  
+  ref <- bind_rows(wealth("Buy & hold gold", 
+                          rep(1, length(s))), wealth("Buy & hold cash", rep(0, length(s))))
+  
+  p5 <- bind_rows(lapply(
+    setdiff(unique(as.character(forecast_results$model)), 
+            c("HA", "Buy & hold gold", "Buy & hold cash")),
+    function(m) {
+      d <- forecast_results %>%
+        filter(as.character(model) == m) %>%
+        arrange(date)
+      
+      wealth(m, as.numeric(d$ret_forecast[s] > 0))
+      } )) %>%
+    ggplot(aes(date, wealth)) +
+    geom_line(data = ref, aes(linetype = model), colour = "black", linewidth = 1.1, alpha = 0.35) +
+    geom_line(aes(colour = model), linewidth = 0.6) +
+    labs(title = paste0("Long/Cash Strategy, 0.1% Cost per Switch, h = ", h),
+         subtitle = "Models that take the same positions as buy-and-hold gold lie on top of its line",
+         x = NULL, y = "Value of 1 invested", colour = NULL, linetype = NULL)
+  
+  save_plot(p5, paste0("h", h, "_5_strategy_wealth"))
+  
+  # bagging and random forest: out-of-bag error vs number of trees (average over the refits)
+  p6 <- bind_rows(
+    tibble(model = "Bagging", trees = seq_along(obj$bagging$oob_mse), oob = obj$bagging$oob_mse),
+    tibble(model = "Random Forest", trees = seq_along(obj$rf$oob_mse), oob = obj$rf$oob_mse)) %>%
+    ggplot(aes(trees, oob, colour = model)) + geom_line(linewidth = 0.7) +
+    labs(
+      title = paste0("Out-of-Bag MSE vs. Number of Trees, h = ", h), 
+      x = "Number of Trees", 
+      y = "OOB MSE (Target Units Squared)", colour = NULL)
+  save_plot(p6, paste0("h", h, "_6_oob_vs_trees"), ht = 4.5)
+  
+  # predictor importance in the forests (IncNodePurity, share of the total, top 15)
+  p7 <- bind_rows(
+    tibble(model = "Bagging", var = names(obj$bagging$importance), imp = obj$bagging$importance),
+    tibble(model = "Random Forest", var = names(obj$rf$importance), imp = obj$rf$importance)) %>%
+    group_by(model) %>% 
+    mutate(share = 100 * imp / sum(imp)) %>% 
+    slice_max(share, n = 15) %>% 
+    ungroup() %>%
+    mutate(key = reorder(paste(model, var, sep = "___"), share)) %>%
+    ggplot(aes(share, key)) + 
+    geom_col(fill = "#1f77b4") +
+    scale_y_discrete(labels = function(x) sub("^.*___", "", x)) +
+    facet_wrap(~ model, scales = "free_y") +
+    labs(title = paste0("Predictor importance (top 15), h = ", h), 
+         x = "% of total node-purity increase", y = NULL)
+  
+  save_plot(p7, paste0("h", h, "_7_predictor_importance"), ht = 6)
+  
+  # LASSO / post-LASSO: how often each predictor is selected
+  sel_freq <- function(m, name) { 
+    f <- colMeans(m$selected)
+    tibble(model = name, var = names(f), freq = 100 * f) 
+  }
+  
+  sf <- bind_rows(sel_freq(obj$lasso, "LASSO"), sel_freq(obj$postlasso, "Post-LASSO")) %>% 
+    filter(freq > 0)
+  
+  p8 <- if (nrow(sf) == 0) {
+    ggplot() + annotate("text", x = 0, y = 0, label = "rlasso selected no predictors in any refit\n(forecast = intercept = historical average)") +
+      theme_void() + labs(title = "LASSO selection frequency")
+  } 
+  else {
+    sf %>% 
+      group_by(model) %>% 
+      slice_max(freq, n = 20, with_ties = FALSE) %>% 
+      ungroup() %>%
+      mutate(key = reorder(paste(model, var, sep = "___"), freq)) %>%
+      ggplot(aes(freq, key)) + 
+      geom_col(fill = "#ff7f0e") +
+      scale_y_discrete(labels = function(x) sub("^.*___", "", x)) +
+      facet_wrap(~ model, scales = "free_y") +
+      labs(title = paste0("LASSO Selection Frequency (Top 20), h = ", h), 
+           x = "% of Refits in which the Predictor is Selected", y = NULL)
+  }
+  
+  save_plot(p8, paste0("h", h, "_8_lasso_selection_frequency"), ht = 6)
+  
+  # LASSO / post-LASSO: number of predictors selected at each refit
+  p9 <- bind_rows(
+    tibble(model = "LASSO", date = as.Date(rownames(obj$lasso$selected)), 
+           n = rowSums(obj$lasso$selected)),
+    tibble(model = "Post-LASSO", date = as.Date(rownames(obj$postlasso$selected)), 
+           n = rowSums(obj$postlasso$selected))) %>%
+    ggplot(aes(date, n, colour = model)) + geom_step(linewidth = 0.6) +
+    labs(title = paste0("Number of Predictors Selected at Each Refit, h = ", h), 
+         x = NULL, y = "Selected Predictors", colour = NULL)
+  
+  save_plot(p9, paste0("h", h, "_9_lasso_n_selected"), ht = 4)
+  
+  # directional accuracy: hit rate vs. the share of up periods (= hit rate of always predicting "up")
+  up <- metrics$HitRate[metrics$model == "Buy & hold gold"]
+  
+  p10 <- metrics %>% 
+    filter(!is.na(HitRate), !model %in% c("Buy & hold gold", "Buy & hold cash")) %>%
+    mutate(stars = cut(PT_p, c(-Inf, 0.01, 0.05, 0.10, Inf), labels = c("***", "**", "*", "")),
+           model = reorder(model, HitRate)) %>%
+    ggplot(aes(HitRate, model)) +
+    geom_col(fill = "#1f77b4") + 
+    geom_text(aes(label = stars), hjust = -0.2) +
+    geom_vline(xintercept = up, linetype = "dashed", colour = "red") +
+    annotate("text", x = up, y = 0.6, label = sprintf(" up periods: %.1f%%", up), 
+             hjust = 0, colour = "red", size = 3.2) +
+    coord_cartesian(xlim = c(40, max(60, up + 5))) +
+    labs(title = paste0("Directional Accuracy (% of Periods with the Correct Sign), h = ", h),
+         subtitle = "Stars: Pesaran-Timmermann test (* 10%, ** 5%, *** 1%); dashed line = always predicting 'up'",
+         x = "Hit Rate (%)", y = NULL)
+  
+  save_plot(p10, paste0("h", h, "_10_directional_accuracy"), ht = 4.5)
+  
+  message("Saved 10 plots to ", "outputs/plots/")
+}
+
+fc_data <- build_dataset("data/raw/")
+
+horizons <- 1 #c(1, 5, 20)
+train_start <- as.Date("2015-01-01")
 test_start <- as.Date("2022-01-01")
 
 for (h in horizons) {
-  md <- prepare_model_data(fc_data, h = h, test_start = test_start, target = "logreturn")
-  models <- list(LASSO = lasso, `Post-LASSO` = postlasso, Bagging = bagging, `Random Forest (tuned)` = rf)
+  md <- prepare_model_data(fc_data, h = h, train_start = train_start, test_start = test_start, 
+                           target = "logreturn")
   
   # run models
   f_ha <- get_historical_average(md)
   f_lasso <- run_rlasso(md)
-  f_plasso <- run_rlasso(md)
+  f_plasso <- run_rlasso(md, post = TRUE)
   f_trees <- run_bagging_rf(md)
+  f_bagging <- f_trees$bagging
+  f_rf <- f_trees$rf
+  f_rf_default <- f_trees$rf_default
+  models <- list(LASSO = f_lasso, `Post-LASSO` = f_plasso, Bagging = f_bagging, 
+                 `Random Forest (tuned)` = f_rf)
   f_ensemble <- run_ensemble(md, models, f_ha)
   
   forecast_results <- bind_rows(
-    make_forecast_results(md, ha$pred_test, model = "HA"),
-    make_forecast_results(md, lasso$pred_test, model = "LASSO"),
-    make_forecast_results(md, postlasso$pred_test, model = "Post-LASSO"),
-    make_forecast_results(md, bagging$pred_test, model = "Bagging"),
-    make_forecast_results(md, rf$pred_test, model = "Random Forest (tuned)"),
-    make_forecast_results(md, rf_default$pred_test, model = "Random Forest (default)"),
-    imap_dfr(ensemble$pred_test, ~ make_forecast_results(md, .x, model = .y))
+    make_forecast_results(md, f_ha$pred_test, model = "HA"),
+    make_forecast_results(md, f_lasso$pred_test, model = "LASSO"),
+    make_forecast_results(md, f_plasso$pred_test, model = "Post-LASSO"),
+    make_forecast_results(md, f_bagging$pred_test, model = "Bagging"),
+    make_forecast_results(md, f_rf$pred_test, model = "Random Forest (tuned)"),
+    make_forecast_results(md, f_rf_default$pred_test, model = "Random Forest (default)"),
+    imap_dfr(f_ensemble$pred_test, ~ make_forecast_results(md, .x, model = .y))
   )
   
-  write.csv(forecast_results, "data/forecast_results.csv")
+  metrics <- evaluate_models(forecast_results, benchmark = "HA")
+  
+  write.csv(forecast_results, paste0("outputs/forecast_results_h", h, ".csv"), row.names = FALSE)
+  write.csv(metrics, paste0("outputs/metrics_h", h, ".csv"), row.names = FALSE)
+  
+  plots(forecast_results, metrics)
 }

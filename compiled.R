@@ -675,6 +675,13 @@ evaluate_models <- function(forecast_results, benchmark = "HA", cost = 0.001, ga
 
 plots <- function(forecast_results, metrics) {
   
+  # helper: significance stars, blank (not NA) when the p-value is missing
+  stars_of <- function(p) {
+    s <- as.character(cut(p, c(-Inf, 0.01, 0.05, 0.10, Inf), labels = c("***", "**", "*", "")))
+    s[is.na(s)] <- ""
+    s
+  }
+  
   save_plot <- function(p, name, w = 10, ht = 6) {
     ggsave(paste0("outputs/plots/", name, ".png"), p, width = w, height = ht, dpi = 150, 
            bg = "white")
@@ -731,17 +738,19 @@ plots <- function(forecast_results, metrics) {
   
   save_plot(p3, paste0("h", h, "_3_cumulative_error_difference"))
   
-  # out-of-sample R^2 vs the historical average (stars: Clark-West test, * 10%, ** 5%, *** 1%)
-  p4 <- metrics %>% 
+  # out-of-sample R^2 vs. the historical average (stars: Clark-West test, * 10%, ** 5%, *** 1%)
+  p4 <- metrics %>%
     filter(!is.na(R2_OOS)) %>%
-    mutate(stars = cut(CW_p, c(-Inf, 0.01, 0.05, 0.10, Inf), labels = c("***", "**", "*", "")),
+    mutate(label = paste0(sprintf("%.2f", R2_OOS)),# stars_of(CW_p)),
            model = reorder(model, R2_OOS)) %>%
     ggplot(aes(R2_OOS, model, fill = R2_OOS > 0)) +
-    geom_col(show.legend = FALSE) + 
-    geom_text(aes(label = stars), hjust = -0.2) +
+    geom_col(show.legend = FALSE) +
+    geom_vline(xintercept = 0, linewidth = 0.6) +
+    geom_text(aes(label = label, hjust = ifelse(R2_OOS > 0, -0.1, 1.1)), size = 3.2) +
     scale_fill_manual(values = c(`TRUE` = "#2ca02c", `FALSE` = "#d62728")) +
-    scale_x_continuous(expand = expansion(mult = c(0.05, 0.15))) +
-    labs(title = paste0("Out-of-Sample R^2 vs. Historical Average (%), h = ", h), 
+    scale_x_continuous(expand = expansion(mult = c(0.15, 0.15))) +              # room for labels on both sides
+    labs(title = paste0("Out-of-Sample R^2 vs. Historical Average (%), h = ", h),
+         #subtitle = "Stars: Clark-West test (* 10%, ** 5%, *** 1%)", 
          x = "R2_OOS (%)", y = NULL)
   
   save_plot(p4, paste0("h", h, "_4_r2_oos"), ht = 4.5)
@@ -781,14 +790,29 @@ plots <- function(forecast_results, metrics) {
   save_plot(p5, paste0("h", h, "_5_strategy_wealth"))
   
   # bagging and random forest: out-of-bag error vs number of trees (average over the refits)
-  p6 <- bind_rows(
-    tibble(model = "Bagging", trees = seq_along(obj$bagging$oob_mse), oob = obj$bagging$oob_mse),
-    tibble(model = "Random Forest", trees = seq_along(obj$rf$oob_mse), oob = obj$rf$oob_mse)) %>%
-    ggplot(aes(trees, oob, colour = model)) + geom_line(linewidth = 0.7) +
-    labs(
-      title = paste0("Out-of-Bag MSE vs. Number of Trees, h = ", h), 
-      x = "Number of Trees", 
-      y = "OOB MSE (Target Units Squared)", colour = NULL)
+  p_x    <- length(obj$bagging$importance)
+  
+  rf_lab <- if (!is.null(obj$rf$mtry)) {
+    paste0("Random Forest (tuned, mtry = ", obj$rf$mtry, ")")
+    } 
+  else {
+    "Random Forest (tuned)"
+  }
+  
+  oob <- bind_rows(
+    tibble(model = paste0("Bagging (mtry = ", p_x, ")"), trees = seq_along(obj$bagging$oob_mse), 
+           oob = obj$bagging$oob_mse),
+    tibble(model = rf_lab, trees = seq_along(obj$rf$oob_mse), oob = obj$rf$oob_mse))
+  
+  if (!is.null(obj$rf_default)) {
+    oob <- bind_rows(oob, tibble(model = paste0("Random Forest (default, mtry = ", floor(p_x / 3), ")"),
+                                 trees = seq_along(obj$rf_default$oob_mse), oob = obj$rf_default$oob_mse))
+  }
+  
+  p6 <- ggplot(oob, aes(trees, oob, colour = model)) +
+    geom_line(linewidth = 0.7) +
+    labs(title = paste0("Out-of-Bag MSE vs. Number of Trees, h = ", h),
+         x = "Number of Trees", y = "OOB MSE (Target Units Squared)", colour = NULL)
   save_plot(p6, paste0("h", h, "_6_oob_vs_trees"), ht = 4.5)
   
   # predictor importance in the forests (IncNodePurity, share of the total, top 15)
@@ -853,17 +877,17 @@ plots <- function(forecast_results, metrics) {
   # directional accuracy: hit rate vs. the share of up periods (= hit rate of always predicting "up")
   up <- metrics$HitRate[metrics$model == "Buy & hold gold"]
   
-  p10 <- metrics %>% 
+  p10 <- metrics %>%
     filter(!is.na(HitRate), !model %in% c("Buy & hold gold", "Buy & hold cash")) %>%
-    mutate(stars = cut(PT_p, c(-Inf, 0.01, 0.05, 0.10, Inf), labels = c("***", "**", "*", "")),
+    mutate(label = paste0(sprintf("%.1f", HitRate), stars_of(PT_p)),
            model = reorder(model, HitRate)) %>%
     ggplot(aes(HitRate, model)) +
-    geom_col(fill = "#1f77b4") + 
-    geom_text(aes(label = stars), hjust = -0.2) +
+    geom_col(fill = "#1f77b4") +
+    geom_text(aes(label = label), hjust = -0.1, size = 3.2) +
     geom_vline(xintercept = up, linetype = "dashed", colour = "red") +
-    annotate("text", x = up, y = 0.6, label = sprintf(" up periods: %.1f%%", up), 
+    annotate("text", x = up, y = 0.6, label = sprintf(" up periods: %.1f%%", up),
              hjust = 0, colour = "red", size = 3.2) +
-    coord_cartesian(xlim = c(40, max(60, up + 5))) +
+    coord_cartesian(xlim = c(40, max(62, up + 7))) +
     labs(title = paste0("Directional Accuracy (% of Periods with the Correct Sign), h = ", h),
          subtitle = "Stars: Pesaran-Timmermann test (* 10%, ** 5%, *** 1%); dashed line = always predicting 'up'",
          x = "Hit Rate (%)", y = NULL)
@@ -887,9 +911,42 @@ plots <- function(forecast_results, metrics) {
     labs(title = paste0("Combination weights at each test origin, h = ", h), 
          x = NULL, y = "Weight", colour = NULL) + 
     theme(legend.position = "top")
+  
   save_plot(p11, paste0("h", h, "_11_combination_weights"), ht = 8)
   
-  message("Saved 11 plots to ", "outputs/plots/")
+  # trading metrics: CAGR, Sharpe ratio and maximum drawdown, buy-and-hold gold as the dashed reference
+  tm <- metrics %>%
+    select(model, CAGR = matches("^(CAGR|AnnRet)$"), Sharpe, MaxDrawdown) %>%
+    rename(`CAGR (%)` = CAGR, `Sharpe ratio` = Sharpe, `Max drawdown (%)` = MaxDrawdown)
+  
+  ord <- tm %>% 
+    filter(!grepl("^Buy", model)) %>% 
+    arrange(`CAGR (%)`) %>% pull(model)
+  
+  tm_long <- tm %>%
+    pivot_longer(-model, names_to = "metric", values_to = "value") %>%
+    mutate(metric = factor(metric, levels = c("CAGR (%)", "Sharpe ratio", "Max drawdown (%)")))
+  
+  ref <- tm_long %>% 
+    filter(model == "Buy & hold gold")
+  
+  p12 <- tm_long %>%
+    filter(model %in% ord, !is.na(value)) %>%
+    mutate(model = factor(model, levels = ord)) %>%
+    ggplot(aes(value, model)) +
+    geom_col(fill = "steelblue") +
+    geom_vline(xintercept = 0, linewidth = 0.4) +
+    geom_vline(data = ref, aes(xintercept = value), linetype = "dashed", colour = "red") +
+    geom_text(aes(label = sprintf("%.2f", value), hjust = ifelse(value >= 0, -0.1, 1.1)), size = 3) +
+    scale_x_continuous(expand = expansion(mult = c(0.2, 0.2))) +
+    facet_wrap(~ metric, scales = "free_x") +
+    labs(title = paste0("Trading Strategy Performance, h = ", h),
+         subtitle = "Gold if forecast > 0, otherwise cash, 0.1% cost per switch; dashed red line = buy-and-hold gold",
+         x = NULL, y = NULL)
+  
+  save_plot(p12, paste0("h", h, "_12_trading_metrics"), w = 12, ht = 5)
+  
+  message("Saved 12 plots to ", "outputs/plots/")
 }
 
 fc_data <- build_dataset("data/raw/")
@@ -924,14 +981,17 @@ for (h in horizons) {
     imap_dfr(f_ensemble$pred_test, ~ make_forecast_results(md, .x, model = .y))
   )
   
+  saveRDS(list(lasso = f_lasso, postlasso = f_plasso, bagging = f_bagging, rf = f_rf, 
+               ensemble = f_ensemble),
+          paste0("outputs/model_objects_h", h, ".rds"))
+  
   metrics <- evaluate_models(forecast_results, benchmark = "HA")
   
   write.csv(forecast_results, paste0("outputs/forecast_results_h", h, ".csv"), row.names = FALSE)
   write.csv(metrics, paste0("outputs/metrics_h", h, ".csv"), row.names = FALSE)
   write_csv(md$transforms, paste0("outputs/transforms_h", h, ".csv"))
-  saveRDS(list(lasso = f_lasso, postlasso = f_plasso, bagging = f_bagging, rf = f_rf, 
-               ensemble = f_ensemble),
-          paste0("outputs/model_objects_h", h, ".rds"))
   
   plots(forecast_results, metrics)
 }
+
+

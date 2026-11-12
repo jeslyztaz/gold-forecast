@@ -52,15 +52,15 @@ for (h in horizons) {
   
   metrics <- evaluate_models(forecast_results, benchmark = "HA")
   
-  out3 <- here("outputs", paste0("outputs/forecast_results_h", h, ".csv"))
+  out3 <- here("outputs", paste0("forecast_results_h", h, ".csv"))
   dir.create(dirname(out3), recursive = TRUE, showWarnings = FALSE)
   write.csv(forecast_results, out3, row.names = FALSE)
   
-  out4 <- here("outputs", paste0("outputs/metrics_h", h, ".csv"))
+  out4 <- here("outputs", paste0("metrics_h", h, ".csv"))
   dir.create(dirname(out4), recursive = TRUE, showWarnings = FALSE)
   write.csv(metrics, out4, row.names = FALSE)
   
-  out5 <- here("outputs", paste0("outputs/transforms_h", h, ".csv"))
+  out5 <- here("outputs", "transforms.csv")
   dir.create(dirname(out5), recursive = TRUE, showWarnings = FALSE)
   write_csv(md$transforms, out5)
   

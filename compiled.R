@@ -991,7 +991,7 @@ for (h in horizons) {
   
   write.csv(forecast_results, paste0("outputs/forecast_results_h", h, ".csv"), row.names = FALSE)
   write.csv(metrics, paste0("outputs/metrics_h", h, ".csv"), row.names = FALSE)
-  write_csv(md$transforms, paste0("outputs/transforms_h", h, ".csv"))
+  write_csv(md$transforms, paste0("outputs/transforms", h, ".csv"))
   
   plots(forecast_results, metrics)
 }

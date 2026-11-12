@@ -1,4 +1,4 @@
-run_rlasso <- function(md, pl = FALSE) {
+run_rlasso <- function(md, post = FALSE) {
   p <- ncol(md$X)
   ev <- md$test_idx
   f <- length(md$test_idx)

@@ -1,4 +1,4 @@
-run_ensemble <- function(md, models, ha, theta = 0.9, min_obs = 60) {
+run_ensemble <- function(md, models, ha, theta = 0.9, min_obs = 252) {
   pred_list <- lapply(names(models), function(nm) {
     as.numeric(models[[nm]]$pred_test)
   })

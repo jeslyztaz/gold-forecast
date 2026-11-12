@@ -485,7 +485,7 @@ run_bagging_rf <- function(md, ntree = 500, refit_every = 21, nodesize = 5, min_
                       oob_mse = oob_rfd / n_refit, mtry = floor(p / 3))))
 }
 
-run_ensemble <- function(md, models, ha, theta = 0.9, min_obs = 60) {
+run_ensemble <- function(md, models, ha, theta = 0.9, min_obs = 252) {
   pred_list <- lapply(names(models), function(nm) {
     as.numeric(models[[nm]]$pred_test)
   })
@@ -627,7 +627,6 @@ evaluate_models <- function(forecast_results, benchmark = "HA", cost = 0.001, ga
   forecast_results <- forecast_results %>% 
     arrange(model, date)
   
-  obj <- readRDS(paste0("outputs/model_objects_h", h, ".rds"))
   h  <- unique(forecast_results$horizon)
   stopifnot(length(h) == 1)
   
@@ -639,7 +638,11 @@ evaluate_models <- function(forecast_results, benchmark = "HA", cost = 0.001, ga
   }
   
   s     <- seq(1, nrow(b), by = h)
-  strat <- function(pos) calculate_strategy(b$gret[s], b$rf[s], pos, h = h)
+  
+  strat <- function(pos) {
+    calculate_strategy(b$gret[s], b$rf[s], pos, cost = cost, h = h)
+  }
+  
   bench <- strat(as.numeric(b$ret_forecast[s] > 0))
   
   res <- lapply(unique(forecast_results$model), function(m) {
@@ -676,6 +679,7 @@ evaluate_models <- function(forecast_results, benchmark = "HA", cost = 0.001, ga
 }
 
 plots <- function(forecast_results, metrics) {
+  h <- unique(forecast_results$horizon)
   
   # helper: significance stars, blank (not NA) when the p-value is missing
   stars_of <- function(p) {

@@ -1,4 +1,5 @@
 plots <- function(forecast_results, metrics) {
+  h <- unique(forecast_results$horizon)
   
   # helper: significance stars, blank (not NA) when the p-value is missing
   stars_of <- function(p) {
@@ -11,8 +12,7 @@ plots <- function(forecast_results, metrics) {
   dir.create(dirname(out), recursive = TRUE, showWarnings = FALSE)
   
   save_plot <- function(p, name, w = 10, ht = 6) {
-    ggsave(paste0(here, name, ".png"), p, width = w, height = ht, dpi = 150, 
-           bg = "white")
+    ggsave(file.path(out, paste0(name, ".png")), p, width = w, height = ht, dpi = 150, bg = "white")
   }
   
   forecast_results <- forecast_results %>% 

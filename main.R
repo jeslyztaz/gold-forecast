@@ -13,7 +13,7 @@ fc_data <- build_dataset(here("data", "raw"))
 out <- here("data", "forecast_dataset.csv")
 dir.create(dirname(out), recursive = TRUE, showWarnings = FALSE)
 write_csv(fc_data, out)
-message("Wrote ", nrow(data), " rows to ", out)
+message("Wrote ", nrow(fc_data), " rows to ", out)
 
 horizons <- c(1, 5, 20)
 train_start <- as.Date("2015-01-01")
@@ -47,8 +47,8 @@ for (h in horizons) {
   
   out2 <- here("outputs", paste0("model_objects_h", h, ".rds"))
   saveRDS(list(lasso = lasso, postlasso = plasso, bagging = bagging, rf = rf, 
-               ensemble = ensemble), out2)
-  message("Saved model RDS to ", out)
+               rf_default = rf_default, ensemble = ensemble), out2)
+  message("Saved model RDS to ", out2)
   
   metrics <- evaluate_models(forecast_results, benchmark = "HA")
   

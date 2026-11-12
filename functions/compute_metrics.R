@@ -68,7 +68,6 @@ evaluate_models <- function(forecast_results, benchmark = "HA", cost = 0.001, ga
   forecast_results <- forecast_results %>% 
     arrange(model, date)
   
-  obj <- readRDS(paste0("outputs/model_objects_h", h, ".rds"))
   h  <- unique(forecast_results$horizon)
   stopifnot(length(h) == 1)
   
@@ -79,8 +78,12 @@ evaluate_models <- function(forecast_results, benchmark = "HA", cost = 0.001, ga
     stop("Benchmark '", benchmark, "' not found in forecast_results")
   }
   
-  s     <- seq(1, nrow(b), by = h)
-  strat <- function(pos) calculate_strategy(b$gret[s], b$rf[s], pos, h = h)
+  s <- seq(1, nrow(b), by = h)
+  
+  strat <- function(pos) {
+    calculate_strategy(b$gret[s], b$rf[s], pos, cost = cost, h = h)
+  }
+  
   bench <- strat(as.numeric(b$ret_forecast[s] > 0))
   
   res <- lapply(unique(forecast_results$model), function(m) {

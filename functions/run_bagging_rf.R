@@ -9,26 +9,26 @@ run_bagging_rf <- function(md, ntree = 500, refit_every = 21, nodesize = 5, min_
   tr0       <- 1:(ev[1] - md$h)
   mtry_grid <- unique(pmax(1, round(c(p / 6, p / 4, p / 3, p / 2))))
   
-  oob_tune  <- sapply(mtry_grid, function(mt) {
-    rf <- randomForest(md$X[tr0, ], md$y[tr0], ntree = ntree, mtry = mt, nodesize = nodesize)
+  oob_tune  <- sapply(mtry_grid, function(metrics) {
+    rf <- randomForest(md$X[tr0, ], md$y[tr0], ntree = ntree, mtry = metrics, nodesize = nodesize)
     tail(rf$mse, 1) # OOB mean squared error
   })
   
   mtry_rf <- mtry_grid[which.min(oob_tune)]
   print(data.frame(mtry = mtry_grid, OOB_MSE = oob_tune))
-  cat("Chosen mtry for RF:", mtry_rf, " (bagging uses mtry =", p, ")\n")
+  cat("Chosen mtry for RF:", mtry_rf, "(bagging uses mtry =", p, ")\n")
   
   # b. expanding-window forecasts
-  f_bag <- f_rf <- numeric(n_ev)
-  imp_bag <- imp_rf <- setNames(numeric(p), vnames)
-  oob_bag <- oob_rf <- numeric(ntree)
+  f_bag <- f_rf <- f_rfd <- numeric(n_ev)
+  imp_bag <- imp_rf <- imp_rfd <- setNames(numeric(p), vnames)
+  oob_bag <- oob_rf <- oob_rfd <- numeric(ntree)
   n_refit <- 0
   
   for (i in seq_len(n_ev)) {
     t <- ev[i]
     if ((i - 1) %% refit_every == 0) { # refit models
       tr <- 1:(t - md$h) # only targets already realised at t
-      stopifnot(length(tr) >= min_trin)
+      stopifnot(length(tr) >= min_train)
       m_bag <- randomForest(md$X[tr, ], md$y[tr], ntree = ntree, mtry = p, nodesize = nodesize)
       m_rf  <- randomForest(md$X[tr, ], md$y[tr], ntree = ntree, mtry = mtry_rf, nodesize = nodesize)
       m_rfd <- randomForest(md$X[tr, ], md$y[tr], ntree = ntree) # all settings at their defaults

@@ -1,35 +1,8 @@
-# Turns the raw forecast dataset into the ONE object that every model, the ensemble and the metrics use.
-#
-# Timing convention (this is what makes the forecasts real forecasts):
-#   * a row is a forecast ORIGIN t = the close of day t; everything in X is known at the close of day t
-#   * the target on row t is realised at t+h and is one of (argument `target`):
-#       "logreturn" : y_t = log(P_{t+h} / P_t)   (h-day-ahead gold log return)
-#       "change"    : y_t = P_{t+h} - P_t        (h-day-ahead dollar change in the gold price)
-#     Either way the price forecast is backed out as P_t + (forecast change)  or  P_t * exp(forecast log return)
-#   * y_t is only known at t+h, so a model fitted at origin t may only use rows s <= t - h
-#
-# Predictors are stationary transformations (returns / deviations / spreads), NOT price levels, and never
-# include `date` or the target. The gold price is a London fix, set hours before the US close, so series recorded at
-# the US close (S&P 500, dollar index, yields, spreads, VIX, oil, gas) are lagged `us_lag` days; uncertainty indices
-# (EPU, GPR) are lagged `macro_lag` extra days and CPI `cpi_lag` trading days, for their publication delays.
-# Brent oil (DCOILBRENTEU), natural gas (DHHNGSP), CPI (CPIAUCSL) and the 20-year yield (DGS20) are used only if their
-# files are in data/raw. Level series (yields, spreads, VIX, uncertainty indices, volatility) are kept in levels only if an
-# ADF test on the TRAINING rows (before val_start) rejects a unit root; otherwise they enter as daily changes.
-#
-# Returns a list:
-#   X, y, date        one row per usable origin (X is a numeric matrix with column names)
-#   P, gret           gold price at the origin, and the realised simple gold return over the next h days
-#   h, target         horizon and target type
-#   rf                h-day risk-free rate known at the origin (3-month T-bill, WTB3MS, lagged one day)
-#   sig2              variance forecast of the h-day return (h x rolling variance of daily log returns)
-#   test_idx          row positions of the test origins
-#   transforms        ADF result for each level series and whether it entered as a level or a change
-
 dlog <- function(x, k = 1) {
   log(x / lag(x, n = k))
 }
 
-prepare_model_data <- function(fc_data, h = 1, test_start, target = c("logreturn", "change")) {
+prepare_model_data <- function(fc_data, h = 1, train_start, test_start, target = c("logreturn", "change")) {
   target <- match.arg(target)
   fc_data <- fc_data[order(fc_data$date), ]
   p  <- fc_data$close_usd_per_troy_oz
@@ -129,7 +102,7 @@ prepare_model_data <- function(fc_data, h = 1, test_start, target = c("logreturn
   levels_ <- intersect(c("DAAA", "DBAA", "DGS10", "T10YIE", "WTB3MS", "TMS", "DFY", "VIXCLS", 
                          "EPU", "RVOL_20", "RVOL_60", "eq_rvol", 
                          grep("^log_.*GPR", names(F), value = TRUE)), names(F))
-  train_rows <- which(fc_data$date < test_start)
+  train_rows <- which(fc_data$date >= train_start & fc_data$date < test_start)
   transforms <- do.call(rbind, lapply(levels_, function(v) {
     x  <- F[[v]][train_rows]; x <- x[!is.na(x)]
     pv <- suppressWarnings(adf.test(x)$p.value)
@@ -165,7 +138,7 @@ prepare_model_data <- function(fc_data, h = 1, test_start, target = c("logreturn
   md$test_idx <- which(md$date >= test_start)
   if (!length(md$test_idx)) stop("Empty test block: check test_start")
   if (anyNA(md$sig2[md$test_idx])) stop("Variance forecast is missing in the evaluation period.")
-
+  
   message("Entered as changes (ADF on training rows): ", 
           paste(transforms$variable[transforms$used_as == "change"], collapse = ", "))
   message(sprintf("h=%d (%s) | origins %s -> %s | p=%d | train %d | test %d", h, target, 
@@ -174,5 +147,3 @@ prepare_model_data <- function(fc_data, h = 1, test_start, target = c("logreturn
   
   return(md)
 }
-
-md <- prepare_model_data(forecast_dataset, test_start = as.Date("2022-01-01"), target = "logreturn")

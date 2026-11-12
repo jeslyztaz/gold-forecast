@@ -4,5 +4,5 @@ get_historical_average <- function(md) {
   pred <- rep(NA_real_, n)
   idx <- (h + 1):n
   pred[idx] <- cumsum(md$y)[idx - h] / (idx - h)
-  return(pred_test = pred[md$test_idx])
+  return(list(pred_test = pred[md$test_idx]))
 }

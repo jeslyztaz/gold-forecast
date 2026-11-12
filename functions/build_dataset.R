@@ -1,7 +1,7 @@
 bond_ret <- function(y, maturity = 20, freq = 252) {
-  dates <- zoo::index(y)
+  dates <- index(y)
   y <- as.numeric(y) / 100
-  cpn <- dplyr::lag(y, n = 1)
+  cpn <- lag(y, n = 1)
   n <- 2 * (maturity - 1 / freq)
   P <- (cpn / y) * (1 - (1 + y / 2)^(-n)) +
     (1 + y / 2)^(-n)
@@ -84,8 +84,8 @@ build_dataset <- function(root) {
         as.numeric(format(observation_date, "%Y")) * 12 +
         as.numeric(format(observation_date, "%m")),
       cpi_inflation = 100 *
-        (log(CPIAUCSL) - dplyr::lag(log(CPIAUCSL))) /
-        (month_index - dplyr::lag(month_index)),
+        (log(CPIAUCSL) - lag(log(CPIAUCSL))) /
+        (month_index - lag(month_index)),
       # Assumed availability: 15th of the following month
       release_date = as.Date(format(observation_date + 31, "%Y-%m-01")) + 14
     ) %>%
@@ -113,7 +113,7 @@ build_dataset <- function(root) {
   ltr_df <- data.frame(date = as.Date(index(ltr_d)), LTR = as.numeric(ltr_d))
   
   # calculate EP and DP (earnings-price ratio & dividend-price ratio)
-  shiller <- readxl::read_excel(file.path(root, "ie_data.xls"), sheet = "Data", skip=7) %>%
+  shiller <- read_excel(file.path(root, "ie_data.xls"), sheet = "Data", skip=7) %>%
     filter(!is.na(Date)) %>%
     mutate(
       Date = as.numeric(Date),
@@ -153,7 +153,7 @@ build_dataset <- function(root) {
   dp_df <- data.frame(date = as.Date(index(dp_d)), DP = as.numeric(dp_d))
   
   # calculate BM (book-to-market ratio)
-  gw <- readxl::read_excel(file.path(root, "PredictorData2025.xlsx"), sheet = "Monthly")
+  gw <- read_excel(file.path(root, "PredictorData2025.xlsx"), sheet = "Monthly")
   
   gw <- gw %>%
     mutate(month = as.Date(paste0(yyyymm, "01"), format = "%Y%m%d"))
@@ -204,11 +204,11 @@ build_dataset <- function(root) {
     fill(everything(), .direction = "down") %>%
     # get lags and moving averages before dataset is sliced
     mutate(
-      lag1 = dplyr::lag(close_usd_per_troy_oz),
-      lag5 = dplyr::lag(close_usd_per_troy_oz, 5),
-      lag20 = dplyr::lag(close_usd_per_troy_oz, 20),
-      ma5 = zoo::rollmean(close_usd_per_troy_oz, k = 5, fill = NA, align = "right"),
-      ma20 = zoo::rollmean(close_usd_per_troy_oz, k = 20, fill = NA, align = "right"),
+      lag1 = lag(close_usd_per_troy_oz),
+      lag5 = lag(close_usd_per_troy_oz, 5),
+      lag20 = lag(close_usd_per_troy_oz, 20),
+      ma5 = rollmean(close_usd_per_troy_oz, k = 5, fill = NA, align = "right"),
+      ma20 = rollmean(close_usd_per_troy_oz, k = 20, fill = NA, align = "right"),
       .before = "GPR_AI"
     ) %>%
     # create columns for calculated variables
@@ -216,10 +216,6 @@ build_dataset <- function(root) {
       TMS = DGS10 - WTB3MS,
       DFY = DBAA - DAAA,
       gold_return = log(close_usd_per_troy_oz / lag1),
-      #log_vix = log(VIXCLS),
-      #ty_yield = DGS10 - dplyr::lag(DGS10),
-      #bei_chg = T10YIE - dplyr::lag(T10YIE),
-      #epu_chg = log(USEPUINDXD / dplyr::lag(USEPUINDXD)),
       RVOL_20 = sqrt(pi / 2) * sqrt(252) *
         rollapply(
           abs(gold_return),
@@ -235,7 +231,8 @@ build_dataset <- function(root) {
           align = "right",
           fill = NA)
     ) %>%
-    filter(date >= "2015-01-01" & date <= "2025-12-31") # keep 10 years of data
+    # add 1 year to lower bound since subsequent computations required up to 1 year of data
+    filter(date >= "2014-01-01" & date <= "2025-12-31")
   
   return(forecast_dataset)
 }

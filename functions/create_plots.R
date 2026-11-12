@@ -33,7 +33,7 @@ plots <- function(forecast_results, metrics) {
       title = sprintf("Actual vs. Predicted gold price (%d-day ahead, last 90 days of the test period)", h),
       x = "Forecast origin", y = "USD per troy oz") + theme(legend.position = "top")
   
-  save_plot(p1, paste0("h", h, "_1_actual_vs_predicted_price"), ht = 8)
+  save_plot(p1, paste0("h", h, "_01_actual_vs_predicted_price"), ht = 8)
   
   # actual vs predicted target
   p2 <- forecast_results %>%
@@ -45,7 +45,7 @@ plots <- function(forecast_results, metrics) {
     labs(title = paste0("Predicted vs. Realised Log Returns (Test Period), h = ", h), 
          x = "Predicted", y = "Actual")
   
-  save_plot(p2, paste0("h", h, "_2_actual_vs_predicted_scatter"), ht = 7)
+  save_plot(p2, paste0("h", h, "_02_actual_vs_predicted_scatter"), ht = 7)
   
   # cumulative squared-error difference vs. historical average
   ha  <- forecast_results %>% 
@@ -64,7 +64,7 @@ plots <- function(forecast_results, metrics) {
          x = NULL, y = "Cumulative (e_HA^2 - e_model^2)", colour = NULL) + 
     theme(legend.position = "top")
   
-  save_plot(p3, paste0("h", h, "_3_cumulative_error_difference"))
+  save_plot(p3, paste0("h", h, "_03_cumulative_error_difference"))
   
   # out-of-sample R^2 vs. the historical average (stars: Clark-West test, * 10%, ** 5%, *** 1%)
   p4 <- metrics %>%
@@ -81,7 +81,7 @@ plots <- function(forecast_results, metrics) {
          #subtitle = "Stars: Clark-West test (* 10%, ** 5%, *** 1%)", 
          x = "R2_OOS (%)", y = NULL)
   
-  save_plot(p4, paste0("h", h, "_4_r2_oos"), ht = 4.5)
+  save_plot(p4, paste0("h", h, "_04_r2_oos"), ht = 4.5)
   
   # trading strategy: growth of 1 invested
   b <- forecast_results %>% 
@@ -115,7 +115,7 @@ plots <- function(forecast_results, metrics) {
          subtitle = "Models that take the same positions as buy-and-hold gold lie on top of its line",
          x = NULL, y = "Value of 1 invested", colour = NULL, linetype = NULL)
   
-  save_plot(p5, paste0("h", h, "_5_strategy_wealth"))
+  save_plot(p5, paste0("h", h, "_05_strategy_wealth"))
   
   # bagging and random forest: out-of-bag error vs number of trees (average over the refits)
   p_x    <- length(obj$bagging$importance)
@@ -141,7 +141,7 @@ plots <- function(forecast_results, metrics) {
     geom_line(linewidth = 0.7) +
     labs(title = paste0("Out-of-Bag MSE vs. Number of Trees, h = ", h),
          x = "Number of Trees", y = "OOB MSE (Target Units Squared)", colour = NULL)
-  save_plot(p6, paste0("h", h, "_6_oob_vs_trees"), ht = 4.5)
+  save_plot(p6, paste0("h", h, "_06_oob_vs_trees"), ht = 4.5)
   
   # predictor importance in the forests (IncNodePurity, share of the total, top 15)
   p7 <- bind_rows(
@@ -159,7 +159,7 @@ plots <- function(forecast_results, metrics) {
     labs(title = paste0("Predictor importance (top 15), h = ", h), 
          x = "% of total node-purity increase", y = NULL)
   
-  save_plot(p7, paste0("h", h, "_7_predictor_importance"), ht = 6)
+  save_plot(p7, paste0("h", h, "_07_predictor_importance"), ht = 6)
   
   # LASSO / post-LASSO: how often each predictor is selected
   sel_freq <- function(m, name) { 
@@ -188,7 +188,7 @@ plots <- function(forecast_results, metrics) {
            x = "% of Refits in which the Predictor is Selected", y = NULL)
   }
   
-  save_plot(p8, paste0("h", h, "_8_lasso_selection_frequency"), ht = 6)
+  save_plot(p8, paste0("h", h, "_08_lasso_selection_frequency"), ht = 6)
   
   # LASSO / post-LASSO: number of predictors selected at each refit
   p9 <- bind_rows(
@@ -200,7 +200,7 @@ plots <- function(forecast_results, metrics) {
     labs(title = paste0("Number of Predictors Selected at Each Refit, h = ", h), 
          x = NULL, y = "Selected Predictors", colour = NULL)
   
-  save_plot(p9, paste0("h", h, "_9_lasso_n_selected"), ht = 4)
+  save_plot(p9, paste0("h", h, "_09_lasso_n_selected"), ht = 4)
   
   # directional accuracy: hit rate vs. the share of up periods (= hit rate of always predicting "up")
   up <- metrics$HitRate[metrics$model == "Buy & hold gold"]

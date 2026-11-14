@@ -432,6 +432,11 @@ run_rlasso <- function(md, post = FALSE) {
     m <- rlasso(md$X[tr, ], md$y[tr], post = post, intercept = TRUE)
     b <- m$coefficients # (Intercept), then one per predictor
     b[is.na(b)] <- 0
+    
+    if (all(b[-1] == 0)) {
+      b[1] <- mean(md$y[tr])
+      }   # nothing selected -> historical mean, not 0
+    
     f[i] <- b[1] + sum(md$X[t, ] * b[-1]) # forecast = intercept + x_t' beta
     sel[i, ] <- as.numeric(b[-1] != 0)
     #cat("rlasso", if (post) "(post)" else "", "refit", i, "of", length(ev), "| selected:", 
@@ -731,11 +736,20 @@ plots <- function(forecast_results, metrics) {
   p2 <- forecast_results %>%
     ggplot(aes(forecast, actual)) +
     geom_point(alpha = 0.25, size = 0.8) +
-    geom_abline(slope = 1, intercept = 0, linetype = "dashed", colour = "red") +
-    geom_smooth(method = "lm", se = FALSE, linewidth = 0.6, formula = y ~ x) +
+    geom_abline(data = data.frame(i = 0, s = 1),
+                aes(intercept = i, slope = s, colour = "45-degree line (perfect forecast)",
+                    linetype = "45-degree line (perfect forecast)")) +
+    geom_smooth(aes(colour = "Fitted line (actual on predicted)", 
+                    linetype = "Fitted line (actual on predicted)"),
+                method = "lm", se = FALSE, linewidth = 0.6, formula = y ~ x) +
+    scale_colour_manual(NULL, values = c("45-degree line (perfect forecast)" = "red",
+                                         "Fitted line (actual on predicted)" = "#3366FF")) +
+    scale_linetype_manual(NULL, values = c("45-degree line (perfect forecast)" = "dashed",
+                                           "Fitted line (actual on predicted)" = "solid")) +
     facet_wrap(~ model, ncol = 3, scales = "free_x") +
-    labs(title = paste0("Predicted vs. Realised Log Returns (Test Period), h = ", h), 
-         x = "Predicted", y = "Actual")
+    labs(title = paste0("Predicted vs. Realised Log Returns (Test Period), h = ", h),
+         x = "Predicted", y = "Actual") +
+    theme(legend.position = "top")
   
   save_plot(p2, paste0("h", h, "_02_actual_vs_predicted_scatter"), ht = 7)
   
@@ -1002,16 +1016,17 @@ for (h in horizons) {
   )
   
   saveRDS(list(lasso = f_lasso, postlasso = f_plasso, bagging = f_bagging, rf = f_rf, 
-               ensemble = f_ensemble),
+               rf_default = f_rf_default, ensemble = f_ensemble),
           paste0("outputs/model_objects_h", h, ".rds"))
   
   metrics <- evaluate_models(forecast_results, benchmark = "HA")
   
   write.csv(forecast_results, paste0("outputs/forecast_results_h", h, ".csv"), row.names = FALSE)
   write.csv(metrics, paste0("outputs/metrics_h", h, ".csv"), row.names = FALSE)
-  write_csv(md$transforms, paste0("outputs/transforms", h, ".csv"))
+  write_csv(md$transforms, paste0("outputs/transforms.csv"))
   
   plots(forecast_results, metrics)
+  
 }
 
 

@@ -105,6 +105,8 @@ build_dataset <- function(root) {
     select(release_date, cpi_inflation)
   
   # calculate DFR (default return spread)
+  # long-term corporate bond return minus the long-term government bond return (Neely et al., 2011)
+  # calculated from DBAA and DGS20
   yd <- forecast_dataset %>%
     select(date, DBAA, DGS20) %>%
     filter(!is.na(DBAA), !is.na(DGS20)) %>%
@@ -226,7 +228,9 @@ build_dataset <- function(root) {
     ) %>%
     # create columns for calculated variables
     mutate(
+      # 10-year Treasury yield minus 3-month Treasury bill rate (Risse, 2019)
       TMS = DGS10 - WTB3MS,
+      # difference between Moody’s BAA- and AAA-rated corporate bond yields (Neely et al., 2011)
       DFY = DBAA - DAAA,
       gold_return = log(close_usd_per_troy_oz / lag1),
       RVOL_20 = sqrt(pi / 2) * sqrt(252) *
@@ -261,8 +265,9 @@ prepare_model_data <- function(fc_data, h = 1, train_start, test_start, target =
   # timing: gold is the London fix, so anything set at the US close (or published with a delay)
   # is not known yet on day t -> use the previous trading day's value
   us_cols <- intersect(c("SP500", "DTWEXBGS", "DCOILBRENTEU", "DHHNGSP", "DAAA", "DBAA", "DGS10",
-                         "T10YIE", "WTB3MS", "TMS", "DFY", "VIXCLS", "USEPUINDXD",
-                         grep("GPR", names(fc_data), value = TRUE)), names(fc_data))
+                         "T10YIE", "WTB3MS", "TMS", "DFY", "VIXCLS", "USEPUINDXD", "EP", "DP", 
+                         "BM", "LTR", "DFR", grep("GPR", names(fc_data), value = TRUE)), 
+                       names(fc_data))
   fc_data[us_cols] <- lapply(fc_data[us_cols], function(x) lag(x, 1))
   
   p  <- fc_data$close_usd_per_troy_oz
@@ -285,7 +290,9 @@ prepare_model_data <- function(fc_data, h = 1, train_start, test_start, target =
     DGS10 = fc_data$DGS10, T10YIE = fc_data$T10YIE, WTB3MS = fc_data$WTB3MS, TMS = fc_data$TMS, 
     DFY = fc_data$DFY, VIXCLS = fc_data$VIXCLS, d_DGS10 = c(NA, diff(fc_data$DGS10)), 
     d_T10YIE = c(NA, diff(fc_data$T10YIE)), d_VIX = c(NA, diff(fc_data$VIXCLS)), 
-    d_DFY = c(NA, diff(fc_data$DFY)), EPU = log(fc_data$USEPUINDXD))
+    d_DFY = c(NA, diff(fc_data$DFY)), EPU = log(fc_data$USEPUINDXD), EP = fc_data$EP, 
+    DP = fc_data$DP, BM = fc_data$BM, LTR = fc_data$LTR, DFR = fc_data$DFR,
+    cpi_inflation = fc_data$cpi_inflation)
   
   # add technical indicators (Neely et al., 2014)
   # moving-average rule: short MA >= long MA;  momentum rule: price >= price m days ago
@@ -361,8 +368,9 @@ prepare_model_data <- function(fc_data, h = 1, train_start, test_start, target =
   # a level series with a unit root (p > 0.05) is replaced by its daily change (first diff)
   # (dropped if that change is already in X)
   levels_ <- intersect(c("DAAA", "DBAA", "DGS10", "T10YIE", "WTB3MS", "TMS", "DFY", "VIXCLS", 
-                         "EPU", "RVOL_20", "RVOL_60", "eq_rvol", 
-                         grep("^ma5_log_.*GPR", names(F), value = TRUE)), names(F))
+                         "EPU", "RVOL_20", "RVOL_60", "eq_rvol", "EP", "DP", "BM", 
+                         "cpi_inflation", grep("^ma5_log_.*GPR", names(F), value = TRUE)), 
+                       names(F))
   train_rows <- which(fc_data$date >= train_start & fc_data$date < test_start)
   transforms <- do.call(rbind, lapply(levels_, function(v) {
     x  <- F[[v]][train_rows]; x <- x[!is.na(x)]
@@ -1026,7 +1034,6 @@ for (h in horizons) {
   write_csv(md$transforms, paste0("outputs/transforms.csv"))
   
   plots(forecast_results, metrics)
-  
 }
 
 

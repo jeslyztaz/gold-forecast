@@ -11,6 +11,10 @@ EPU,0.01,level
 RVOL_20,0.01,level
 RVOL_60,0.141,change
 eq_rvol,0.54,change
+EP,0.684,change
+DP,0.555,change
+BM,0.082,change
+cpi_inflation,0.01,level
 ma5_log_GPR_AI,0.01,level
 ma5_log_GPR_AER,0.01,level
 ma5_log_GPR_OIL,0.01,level

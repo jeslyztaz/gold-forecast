@@ -783,7 +783,7 @@ plots <- function(forecast_results, metrics) {
   # out-of-sample R^2 vs. the historical average (stars: Clark-West test, * 10%, ** 5%, *** 1%)
   p4 <- metrics %>%
     filter(!is.na(R2_OOS)) %>%
-    mutate(label = paste0(sprintf("%.2f", R2_OOS)), stars_of(CW_p),
+    mutate(label = paste0(sprintf("%.2f", R2_OOS), stars_of(CW_p)),
            model = reorder(model, R2_OOS)) %>%
     ggplot(aes(R2_OOS, model, fill = R2_OOS > 0)) +
     geom_col(show.legend = FALSE) +

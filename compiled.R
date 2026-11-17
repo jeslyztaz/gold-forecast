@@ -783,7 +783,7 @@ plots <- function(forecast_results, metrics) {
   # out-of-sample R^2 vs. the historical average (stars: Clark-West test, * 10%, ** 5%, *** 1%)
   p4 <- metrics %>%
     filter(!is.na(R2_OOS)) %>%
-    mutate(label = paste0(sprintf("%.2f", R2_OOS)),# stars_of(CW_p)),
+    mutate(label = paste0(sprintf("%.2f", R2_OOS)), stars_of(CW_p),
            model = reorder(model, R2_OOS)) %>%
     ggplot(aes(R2_OOS, model, fill = R2_OOS > 0)) +
     geom_col(show.legend = FALSE) +
@@ -792,7 +792,7 @@ plots <- function(forecast_results, metrics) {
     scale_fill_manual(values = c(`TRUE` = "#2ca02c", `FALSE` = "#d62728")) +
     scale_x_continuous(expand = expansion(mult = c(0.15, 0.15))) +              # room for labels on both sides
     labs(title = paste0("Out-of-Sample R^2 vs. Historical Average (%), h = ", h),
-         #subtitle = "Stars: Clark-West test (* 10%, ** 5%, *** 1%)", 
+         subtitle = "Stars: Clark-West test (* 10%, ** 5%, *** 1%)", 
          x = "R2_OOS (%)", y = NULL)
   
   save_plot(p4, paste0("h", h, "_04_r2_oos"), ht = 4.5)

@@ -2,7 +2,6 @@
 
 This project asks whether macroeconomic, technical and uncertainty predictors, combined with machine learning methods, can beat the historical average in forecasting gold returns, both statistically and economically. This is examined at daily, weekly and monthly horizons.
 
----
 
 ## Setup Guide
 
@@ -20,7 +19,6 @@ cd gold-forecast
 
 Run either `main.R` or `compiled.R`
 
----
 
 ## Project Structure
 

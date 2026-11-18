@@ -9,7 +9,7 @@ plots <- function(forecast_results, metrics) {
   }
   
   out <- here("outputs", "plots")
-  dir.create(dirname(out), recursive = TRUE, showWarnings = FALSE)
+  dir.create(out, recursive = TRUE, showWarnings = FALSE)
   
   save_plot <- function(p, name, w = 10, ht = 6) {
     ggsave(file.path(out, paste0(name, ".png")), p, width = w, height = ht, dpi = 150, bg = "white")
@@ -39,11 +39,20 @@ plots <- function(forecast_results, metrics) {
   p2 <- forecast_results %>%
     ggplot(aes(forecast, actual)) +
     geom_point(alpha = 0.25, size = 0.8) +
-    geom_abline(slope = 1, intercept = 0, linetype = "dashed", colour = "red") +
-    geom_smooth(method = "lm", se = FALSE, linewidth = 0.6, formula = y ~ x) +
+    geom_abline(data = data.frame(i = 0, s = 1),
+                aes(intercept = i, slope = s, colour = "45-degree line (perfect forecast)",
+                    linetype = "45-degree line (perfect forecast)")) +
+    geom_smooth(aes(colour = "Fitted line (actual on predicted)", 
+                    linetype = "Fitted line (actual on predicted)"),
+                method = "lm", se = FALSE, linewidth = 0.6, formula = y ~ x) +
+    scale_colour_manual(NULL, values = c("45-degree line (perfect forecast)" = "red",
+                                         "Fitted line (actual on predicted)" = "#3366FF")) +
+    scale_linetype_manual(NULL, values = c("45-degree line (perfect forecast)" = "dashed",
+                                           "Fitted line (actual on predicted)" = "solid")) +
     facet_wrap(~ model, ncol = 3, scales = "free_x") +
-    labs(title = paste0("Predicted vs. Realised Log Returns (Test Period), h = ", h), 
-         x = "Predicted", y = "Actual")
+    labs(title = paste0("Predicted vs. Realised Log Returns (Test Period), h = ", h),
+         x = "Predicted", y = "Actual") +
+    theme(legend.position = "top")
   
   save_plot(p2, paste0("h", h, "_02_actual_vs_predicted_scatter"), ht = 7)
   

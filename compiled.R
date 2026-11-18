@@ -8,6 +8,7 @@ library(hdm)          # for rlasso()
 library(randomForest) # for bagging and random forest
 library(lsei)         # for forecast combination
 library(sandwich)     # for metrics
+# xts is also used, but not import in case it masks dplyr functions like lag()
 
 bond_ret <- function(y, maturity = 20, freq = 252) {
   dates <- index(y)
@@ -99,13 +100,13 @@ build_dataset <- function(root) {
       cpi_inflation = 100 *
         (log(CPIAUCSL) - lag(log(CPIAUCSL))) /
         (month_index - lag(month_index)),
-      # Assumed availability: 15th of the following month
+      # Assumed availability: 15th of the second month after
       release_date = as.Date(format(observation_date + 62, "%Y-%m-01")) + 14
     ) %>%
     select(release_date, cpi_inflation)
   
   # calculate DFR (default return spread)
-  # long-term corporate bond return minus the long-term government bond return (Neely et al., 2011)
+  # long-term corporate bond return minus the long-term government bond return (Neely et al., 2014)
   # calculated from DBAA and DGS20
   yd <- forecast_dataset %>%
     select(date, DBAA, DGS20) %>%
@@ -144,7 +145,7 @@ build_dataset <- function(root) {
   # monthly earnings
   e_m <- xts::xts(shiller$E, order.by = shiller$month)["2013-06-01/2025-12-31"]
   colnames(e_m) <- "E12"
-  # 3-month publication lag
+  # 1-month lag
   e_avail <- xts::lag.xts(e_m, 1)
   # monthly dividends
   ok <- !is.na(shiller$D) & shiller$D > 0
@@ -230,7 +231,7 @@ build_dataset <- function(root) {
     mutate(
       # 10-year Treasury yield minus 3-month Treasury bill rate (Risse, 2019)
       TMS = DGS10 - WTB3MS,
-      # difference between Moody’s BAA- and AAA-rated corporate bond yields (Neely et al., 2011)
+      # difference between Moody’s BAA- and AAA-rated corporate bond yields (Neely et al., 2014)
       DFY = DBAA - DAAA,
       gold_return = log(close_usd_per_troy_oz / lag1),
       RVOL_20 = sqrt(pi / 2) * sqrt(252) *

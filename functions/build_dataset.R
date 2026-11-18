@@ -86,8 +86,8 @@ build_dataset <- function(root) {
       cpi_inflation = 100 *
         (log(CPIAUCSL) - lag(log(CPIAUCSL))) /
         (month_index - lag(month_index)),
-      # Assumed availability: 15th of the following month
-      release_date = as.Date(format(observation_date + 31, "%Y-%m-01")) + 14
+      # Assumed availability: 15th of the second month after
+      release_date = as.Date(format(observation_date + 62, "%Y-%m-01")) + 14
     ) %>%
     select(release_date, cpi_inflation)
   
@@ -129,7 +129,7 @@ build_dataset <- function(root) {
   # monthly earnings
   e_m <- xts::xts(shiller$E, order.by = shiller$month)["2013-06-01/2025-12-31"]
   colnames(e_m) <- "E12"
-  # 3-month publication lag
+  # 1-month lag
   e_avail <- xts::lag.xts(e_m, 1)
   # monthly dividends
   ok <- !is.na(shiller$D) & shiller$D > 0

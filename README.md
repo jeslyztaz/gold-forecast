@@ -1,3 +1,27 @@
+# Gold Forecast
+
+This project asks whether macroeconomic, technical and uncertainty predictors, combined with machine learning methods, can beat the historical average in forecasting gold returns, both statistically and economically. This is examined at daily, weekly and monthly horizons.
+
+---
+
+## Setup Guide
+
+### Prerequisites
+
+- All packages in `setup.R`
+
+**1. Clone the repository**
+```bash
+git clone https://github.com/jeslyztaz/gold-forecast.git
+cd gold-forecast
+```
+
+**2. Run the code**
+
+Run either `main.R` or `compiled.R`
+
+---
+
 ## Project Structure
 
 ```
@@ -5,7 +29,7 @@ gold-forecast/
 ├── data/
 │   ├── raw/
 │   ├── forecast_dataset.csv
-│   └── README.md                    # raw data description and sources
+│   └── README.md                    # raw data sources
 ├── functions/
 │   ├── build_dataset.R
 │   ├── build_results_dataset.R
@@ -28,5 +52,3 @@ gold-forecast/
 ├── README.md
 └── setup.R
 ```
-
-Our project results can be replicated by running `main.R` or `compiled.R`.

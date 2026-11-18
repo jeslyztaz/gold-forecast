@@ -2,7 +2,7 @@ run_rlasso <- function(md, post = FALSE) {
   p <- ncol(md$X)
   ev <- md$test_idx
   f <- length(md$test_idx)
-  sel <- matrix(0, f, p, dimnames = list(NULL, colnames(md$X)))
+  sel <- matrix(0, f, p, dimnames = list(format(md$date[ev]), colnames(md$X)))
   
   for (i in seq_len(f)) {
     t  = ev[i]
@@ -10,8 +10,15 @@ run_rlasso <- function(md, post = FALSE) {
     m <- rlasso(md$X[tr, ], md$y[tr], post = post, intercept = TRUE)
     b <- m$coefficients # (Intercept), then one per predictor
     b[is.na(b)] <- 0
+    
+    if (all(b[-1] == 0)) {
+      b[1] <- mean(md$y[tr])
+    }   # nothing selected -> historical mean, not 0
+    
     f[i] <- b[1] + sum(md$X[t, ] * b[-1]) # forecast = intercept + x_t' beta
     sel[i, ] <- as.numeric(b[-1] != 0)
+    #cat("rlasso", if (post) "(post)" else "", "refit", i, "of", length(ev), "| selected:", 
+    #   sum(m$index), "\n")
   }
   
   return(list(pred_test  = f, n_selected = rowSums(sel), selected = sel == 1))
